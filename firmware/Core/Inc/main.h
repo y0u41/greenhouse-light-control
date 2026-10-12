@@ -50,14 +50,13 @@
 #define DEBUG_UART              0
 #endif
 
-/* 安全闪烁自检固件开关（**诊断用，发布必须为 0**）：
- *   1 = main() 退化为"只 HAL_Init + LED0 快速闪烁"，不配时钟、不开 IWDG、
- *       不用串口/ADC/LCD。用于把"MCU 有没有在跑我们的镜像"与
- *       "我们的初始化序列有问题"彻底分开 —— 上板排查第一步就该跑它。
- * 生成工程时用 `py tools/make_keil_project.py --safeblink` 可自动置 1。 */
-#ifndef SAFE_BLINK_TEST
-#define SAFE_BLINK_TEST         0
-#endif
+/* 安全闪烁自检固件开关**已移除**（原 SAFE_BLINK_TEST）：
+ *   曾在 main.c 里放一套绕过 HAL 的备用 main()（只开 GPIOB + 忙等翻转 PB5），
+ *   用于把"MCU 有没有在跑我们的镜像"与"我们的初始化序列有问题"彻底分开。
+ *   该分支从未被构建过（Keil 工程 Define 里始终没有它），属于**编译掉的死代码**，
+ *   已整段删除。分诊思路见 docs/lessons.md#semihosting —— 现在 main() 开头的
+ *   **裸寄存器三次闪灯**已能把"没进 main()"与"进 main 后在 HAL 里挂掉"分开，
+ *   无需再维护第二套 main() 入口。 */
 
 /* ===================== 全局状态 ===================== */
 /* 唯一定义处：main.c。各业务模块通过 main.h 以 extern 访问。 */

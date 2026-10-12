@@ -20,6 +20,7 @@
 | `项目规划书.docx` | 由 `项目规划书.md` 经 `tools/md2docx.py` 生成，**不要手工改 docx**，改 md 后重新生成 |
 | `设计报告.md` / `.docx` | **任务书第 4 项交付物**（设计报告）。实测值与【待测】项严格区分：拿到硬件后按报告 8.3 用例表逐项补测并回填状态列，**禁止把推测值写成实测结果** |
 | `AGENTS.md` | 本文件：协作约定与已知陷阱 |
+| `docs/lessons.md` | **踩坑全记录**：本文件「已知陷阱」的**完整来龙去脉 + 证据 + 复现方法**（半主机 bkpt、IWDG 六坑、复位源取证、观测工具陷阱、优先级分组、启动顺序、进度闪灯码、LCD 面板识别）。「已知陷阱」是速查条目，本文件是详版，两者刻意不重复。`main.c` 的注释按 `docs/lessons.md#<锚点>` 指到这里 |
 
 - 冲突处理：**PRD > Tech_Design > 项目规划书 > 代码现状**；发现冲突先向用户提出，不要自行选一个默默改掉
 - 涉及引脚 / 协议 / 阈值的任何改动，必须**先改 `Tech_Design.md` 附录 A**，再同步其余文档与代码
@@ -295,6 +296,8 @@ greenhouse/
 ├─ 项目内容.txt            # 任务书原文（只读，不要改）
 ├─ firmware/              # STM32 固件：CubeMX 生成 Core/Drivers/Middlewares，业务代码放 Core/Src 与 Core/Inc
 ├─ qtapp/                 # Qt 上位机：源码 src/，资源 resources/，构建产物 build/ 不入仓
+├─ tests/                 # 主机原生测试（tests/host）：control.c / protocol.c 的行为测试，不覆盖 main.c
+├─ docs/                  # lessons.md：踩坑全记录（本文件「已知陷阱」的详版）
 ├─ tools/                 # 辅助脚本（节点模拟器、协议调试工具、md2docx.py）
 └─ README.md
 ```

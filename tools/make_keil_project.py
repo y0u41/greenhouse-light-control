@@ -23,7 +23,10 @@ make_keil_project.py —— 由官方模板生成 Keil MDK 工程（greenhouse.u
     py tools/make_keil_project.py              # 生成工程（发布态）
     py tools/make_keil_project.py --check      # 只校验被引用文件是否存在
     py tools/make_keil_project.py --debug      # 追加 -DDEBUG_UART=1（上板诊断）
-    py tools/make_keil_project.py --safeblink  # 追加 -DSAFE_BLINK_TEST=1（只闪灯自检）
+
+    注：原来的 --safeblink（-DSAFE_BLINK_TEST=1，只闪灯自检）已随 main.c 里那套
+    被编译掉的备用 main() 一并移除；分诊"没进 main() / 进 main 后挂掉"请依赖
+    main() 开头的裸寄存器三次闪灯，详见 docs/lessons.md#semihosting。
 """
 
 from __future__ import annotations
@@ -49,7 +52,6 @@ OUTPUT_NAME = "greenhouse"
 DEFINES = "USE_HAL_DRIVER,STM32F103xE"
 DEBUG_DEFINE = "DEBUG_UART=1"
 DEBUG_BUILD = False
-SAFEBLINK_BUILD = False
 
 # ST-Link 在 Keil 用户选项里的标识
 NTESL_STLINK = 6
@@ -165,8 +167,6 @@ def generate() -> None:
     defs = DEFINES
     if DEBUG_BUILD:
         defs += "," + DEBUG_DEFINE
-    if SAFEBLINK_BUILD:
-        defs += ",SAFE_BLINK_TEST=1"
     _sub(vc, "Define", defs)
     _sub(vc, "IncludePath", ";".join(INCLUDE_PATHS))
 
@@ -219,16 +219,13 @@ def generate_uvoptx() -> None:
 
 
 def main() -> None:
-    global DEBUG_BUILD, SAFEBLINK_BUILD
+    global DEBUG_BUILD
     ap = argparse.ArgumentParser(description="生成 Keil MDK 工程")
     ap.add_argument("--check", action="store_true", help="只校验引用文件是否存在")
     ap.add_argument("--debug", action="store_true",
                     help="打开调试串口（追加 -DDEBUG_UART=1，用于上板诊断）")
-    ap.add_argument("--safeblink", action="store_true",
-                    help="安全闪烁自检固件（追加 -DSAFE_BLINK_TEST=1）")
     args = ap.parse_args()
     DEBUG_BUILD = args.debug
-    SAFEBLINK_BUILD = args.safeblink
 
     missing = _verify()
     if missing:
@@ -241,8 +238,6 @@ def main() -> None:
         print("引用校验通过：源文件与包含路径均存在")
     if DEBUG_BUILD:
         print("注意：本次为诊断构建（DEBUG_UART=1），发布前请重跑不带 --debug 的生成")
-    if SAFEBLINK_BUILD:
-        print("注意：本次为自检构建（SAFE_BLINK_TEST=1），main 退化为只闪 LED0")
 
     if args.check:
         return
