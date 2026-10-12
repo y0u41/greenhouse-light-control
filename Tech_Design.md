@@ -679,17 +679,28 @@ bool Protocol_PopCommand(char *out, size_t cap)
 
 <!-- FACT:fw-at BEGIN -->
 ```text
-IDLE → RST → CWMODE=1 → CWJAP → CIPSTART("TCP","<Qt_IP>",9092) → CIPMODE=1(透传) → CONNECTED
-                                                                            ↓
-DISCONNECT ←────────────────────── 网络断开 / 错误 / AT 超时 / 收到整行 CLOSED、WIFI DISCONNECT
+IDLE → RST → CWMODE=1 → CWJAP
+     → CIPMUX=0 → CIPMODE=1(透传) → CIPSTART("TCP","<Qt_IP>",9092)
+     → 等 CONNECT → CIPSEND → 等 '>' → CONNECTED
+                    ↓
+DISCONNECT ←──────── 网络断开 / 错误 / AT 超时 / 收到整行 CLOSED、WIFI DISCONNECT
      ↓ 退避重连（2 s → 4 s → 8 s，上限 30 s，带 IWDG_Feed）
    RST 重新开始
 ```
+
+★ **顺序不可调换**：`AT+CIPMODE=1` 必须在 `AT+CIPSTART` **之前**发送。
+若写成"先 CIPSTART 再 CIPMODE=1"，CIPSTART 能拿到 `CONNECT`、CIPMODE 也回 `OK`，
+但紧接着的 `AT+CIPSEND` 会直接回 **`ERROR`** —— 永远进不了透传，双向零帧。
+同理 `AT+CIPSTART` 是**异步**的：先回 `OK`（命令已接受），再回 `CONNECT`（真正建链），
+**必须等 `CONNECT` 而不能把 `OK` 当成功**。
+（依据 `firmware/Core/Src/esp8266.c` 的 `send_step_cmd()`；详见 `docs/lessons.md#esp8266-at`）
 <!-- FACT:fw-at END -->
 
 - 每个 AT 步骤都有超时，超时即回退，绝不无限等待
 - AT 序列：`AT+RST` → `AT+CWMODE=1`（Station）→ `AT+CWJAP="SSID","PWD"`（连热点）→
-  `AT+CIPSTART="TCP","<PC_IP>",9092` → `AT+CIPMODE=1`（进入透传）；此后直接收发数据，无 `+IPD` 前缀
+  `AT+CIPMUX=0` → **`AT+CIPMODE=1`（透传模式，必须建链之前设）** →
+  `AT+CIPSTART="TCP","<PC_IP>",9092`（**等 `CONNECT`**，不是等 `OK`）→
+  `AT+CIPSEND`（**等 `>`**）；此后直接收发数据，无 `+IPD` 前缀
 - 透传模式下若链路静默断开，STM32 侧收不到通知；**靠 1 s 上报失败（发送超时/无 ack）触发重连**
 - Qt 的 IP 与端口来自配置文件（不硬编码）
 - **退出透传的识别用"前缀嗅探"**：透传期只累积很短的前缀（`AT_LINE_SNIFF_MAX = 32` B），超出即判定为 JSON 负载并丢弃到行尾。既省去无谓拷贝，也杜绝负载中恰好含 `CLOSED` 子串导致的误重连。

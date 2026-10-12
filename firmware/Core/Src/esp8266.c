@@ -3,7 +3,10 @@
  * @brief ESP8266 AT 状态机：联网、TCP 透传、退避重连。
  *
  * 设计要点（Tech_Design §ESP8266 AT 状态机 / §接收行缓冲）：
- *  - 状态机：RST → CWMODE=1 → CWJAP → CIPSTART → CIPMODE=1(透传) → CONNECTED；
+ *  - 状态机：RST → CWMODE=1 → CWJAP → CIPSTART → **CIPSEND** → CONNECTED；
+ *    ⚠ 注意：`AT+CIPMUX=0` 与 **`AT+CIPMODE=1` 是在 `AT+CIPSTART` 之前**发送的
+ *    （见 send_step_cmd() 里的说明）。顺序写反会导致 `AT+CIPSEND` 直接回 `ERROR`、
+ *    永远进不了透传；`AT+CIPSTART` 还是异步的，必须等 `CONNECT` 而非 `OK`。
  *    失败/超时/收到 CLOSED → 退避重连（2 s → 4 s → 8 s … 上限 30 s）；
  *  - 全程非阻塞：Poll 里推进，等待过程仍可喂狗，绝不出现无喂狗的阻塞延时；
  *  - 透传模式下收到的数据不带 +IPD 前缀，透传期 RX 直接转交 Protocol_RxByte()；
