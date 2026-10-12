@@ -124,12 +124,11 @@ def main() -> None:
     actions_h = read(QT / "protocol_actions.h")
     config_c = read(QT / "config.cpp")
     esp_c = read(FW / "Src" / "esp8266.c")
-    # docs 同时纳入 IWDG_DOCS 的条目：后者的文件（如 firmware/CUBEMX_SETUP.md）
-    # 不在 DOCS 里，但 IWDG 守卫要按名字取它的内容。
-    # **刻意不改 DOCS 本身** —— 免得影响任何遍历 DOCS 的既有检查（如版本号一致性）。
-    # 对本行之后只用 docs.values() 做"拼接后子串存在性"判断的检查而言，
-    # 多纳入几份文档只会增加可命中文本，不会让原本通过的断言失败。
-    docs = {n: read(ROOT / n) for n in dict.fromkeys(DOCS + IWDG_DOCS)}
+    # docs 只含 DOCS 里的文档。IWDG_DOCS 中的文件（如 firmware/CUBEMX_SETUP.md，
+    # 它是文档、只是恰好住在 firmware/ 下）**不并入 docs 字典** ——
+    # 因为 docs 还被其它检查使用（例如"文档集版本号一致"会遍历它，
+    # 而 CUBEMX_SETUP.md 没有版本号，并进去会把那条检查带红）。
+    docs = {n: read(ROOT / n) for n in DOCS}
     all_docs = "\n".join(docs.values())
 
     print("== 1. 动作词汇：契约 / 固件 / Qt 三处必须一致 ==")
@@ -219,7 +218,10 @@ def main() -> None:
         problems: list[str] = []
         n_period = n_reload = 0
         for name in IWDG_DOCS:
-            periods, reloads = iwdg_claims(docs[name])
+            # 不在 DOCS 里的（如 firmware/CUBEMX_SETUP.md）就地读取，
+            # 不污染共享的 docs 字典（见上面 docs 构造处的说明）。
+            text = docs[name] if name in docs else read(ROOT / name)
+            periods, reloads = iwdg_claims(text)
             n_period += len(periods)
             n_reload += len(reloads)
             if not periods:
