@@ -20,7 +20,7 @@
 
 用法：
   python tools/package_submission.py                    # 生成源码包
-  python tools/package_submission.py --with-docs-only   # 只打包文档（更小）
+  python tools/package_submission.py --docs-only        # 只打包文档（更小）
   python tools/package_submission.py -o D:\\提交.zip
 """
 

@@ -92,7 +92,8 @@
 
 ## 七、测试与完成定义（DoD）
 
-- 主机原生测试在 `tests/host`（`control.c` / `protocol.c` 的行为测试，不覆盖 `main.c`），由 `build.ps1 -Target test` 跑
+- 主机原生测试在 `tests/host`（`control.c` / `protocol.c` 的行为测试，**不覆盖 `main.c`**），
+  **必须全绿**；命令见 `README.md` §快速开始，已接入 `build.ps1 -Target test`
 - 硬件相关改动必须在真实开发板或 `tools/simulate_node.py` 虚拟节点上验证过
 - ADC 方向（照射 → `light` 上升、`adc` 下降）、回差三点边界、手动优先不回弹、上电执行器断开且蜂鸣器不响、
   `ACTUATOR_*` 宏替换后 `T02/T03/T05` 复测通过
@@ -106,8 +107,8 @@
 - 分支：`main`（保护分支）、`feat/<主题>`、`fix/<主题>`；Conventional Commits（feat / fix / docs / refactor / test / chore）；
   一个提交只做一件事，**固件与 Qt 分开提交**；PR 描述写清"改了什么、为什么、怎么验证、影响哪些文档"
 - 基线提交 `9defdeb`（327 文件全量入仓）与 `06aa657`（删除 6.8 MB 历史遗留副本）**不要 rebase / force push 掉** —— `_attic/` 靠它们才可恢复
-- **★ 交付 / 交作业必须用 `git archive`，不要右键压缩目录 ★**：`.gitignore` 保护不了"把目录打 zip 发群里"，
-  `wifi_config.h` 里是真实 WiFi 密码，整目录打包会随包带走。用 `tools/package_submission.py` 打包并自校验：包内无 `wifi_config.h` / `.uvoptx` / `Output/` / `qtapp/build/`，并全文搜索真实 SSID 与密码，失败自动删包
+- **★ 交付 / 交作业必须用 `tools/package_submission.py`（内部走 `git archive`），不要右键压缩目录 ★**：
+  `.gitignore` 保护不了"整目录打 zip 发群"，`wifi_config.h` 的真实 WiFi 密码会随包带走；命令与自校验项见 `README.md` §交付打包
 - 提交前自检：`git status --porcelain` 应为空；确认 `wifi_config.h` 被 `.gitignore` 命中；
   `git log --all --pretty=format: --name-only | grep wifi_config` 应只有 `.example`
 - 命令与脚本用法见 `README.md` §快速开始；改任一处后必跑 `tools/consistency_check.py`

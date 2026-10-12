@@ -464,14 +464,14 @@ LCD ID:7796
   若 Qt 占了 8092，该脚本会误报"服务已在运行"
 - 节点 `AT+CIPSTART` 的目标是 `<PC_IP>:9092`；PC 建议静态 IP 或 DHCP 保留，
   并**放行 9092 入站**（Qt 已绑 `0.0.0.0`，缺的往往是防火墙规则）
-- llama-server 服务管理（三个脚本都在 `D:\llama.cpp\模型启动\`）：
-  `启动.cmd` / `状态.cmd` / `停止.cmd`；日志落 `D:\llama.cpp\logs\server.log`
+- llama-server 服务管理**脚本清单与日志位置**见 `README.md` §4（llama.cpp）
 - 服务以 **router 模式**运行（`--models-dir --models-max 1`）：模型按需加载、
   同一时刻仅驻留一个。请求体的 `model` 字段取值必须来自 `GET /v1/models`；
   **首次请求 / 切换模型要付权重加载时间**，演示前必须先预热一次；
   若不需要切模型，直接用固定单模型启动（`-m glm-4.7-flash.gguf`）
-- **工具也会抢端口**：`tools/hil_probe.py`（硬件在环验证探针，代替 Qt 当 TCP 服务端）
-  **不可与 Qt 上位机同时运行**；其端口须与固件 `wifi_config.h` 一致
+- **别的 TCP 服务端会抢 9092**：一旦有第二个进程监听 9092（如硬件在环探针），
+  节点就连到"错误的那一个"服务端上，表现为 Qt 收不到帧、或收到一半的会话。
+  工具的用法与前提见 `README.md` §硬件在环验证
 
 ## beep-led
 

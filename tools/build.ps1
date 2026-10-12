@@ -180,6 +180,7 @@ function Invoke-Tests {
         @{ n = '协议单一事实源自检'; a = @('tools\protocol_schema.py') },
         @{ n = '协议契约测试';       a = @('tools\contract_test.py') },
         @{ n = '跨层一致性守护';     a = @('tools\consistency_check.py') },
+        @{ n = '主机端行为测试';     a = @('tests\host\run_host_tests.py') },
         @{ n = '文档生成区未漂移';   a = @('tools\sync_doc_tables.py', '--check') },
         @{ n = '虚拟节点自检';       a = @('tools\simulate_node.py', '--selftest') },
         @{ n = 'Keil 工程引用校验';  a = @('tools\make_keil_project.py', '--check') }

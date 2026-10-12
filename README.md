@@ -84,10 +84,14 @@ tools/
 ├─ contract_test.py           协议契约测试（动作词汇 / set_th 边界 / 示例帧）
 ├─ consistency_check.py       跨层一致性守护（固件 ↔ Qt ↔ 契约 ↔ 文档）
 ├─ simulate_node.py           虚拟节点（多点位演示 / 协议自测）
+├─ hil_probe.py               硬件在环验证探针（代替 Qt 当 TCP 服务端，核对协议不变式）
+├─ package_submission.py      交付打包（git archive + 密钥结构性排除，包后自校验）
 ├─ make_keil_project.py       由模板生成 greenhouse.uvprojx（含引用校验）
 ├─ build.ps1                  一键构建与自检（含中文路径规避）
 ├─ bump_version.py            文档集版本号 + 修订记录一次同步
 └─ md2docx.py                 项目规划书 md → docx
+tests/
+└─ host/                      主机端行为测试（原生 gcc 编译 control.c / protocol.c 原文）
 ```
 
 ## 快速开始（分步）
@@ -98,8 +102,14 @@ tools/
 py tools/contract_test.py              # 11 个契约测试，必须全绿
 py tools/consistency_check.py          # 30 项跨层一致性（固件/Qt/契约/文档 四处对齐）
 py tools/simulate_node.py --selftest   # 虚拟节点状态机自测（含手动优先、断帧残留）
+py tests\host\run_host_tests.py        # 主机端行为测试（control 129 + protocol 68 用例）
 py firmware/prebuild_check.py          # 固件编译前自检
 ```
+
+> `run_host_tests.py` 用 `tests/host/shim/stm32f1xx_hal.h` 垫片在 x86 上编译
+> `firmware/Core/Src/control.c` / `protocol.c` 的**原文**（不复制、不改动），
+> 改控制逻辑后**不必烧板**即可秒级回归；gcc 自动探测（首选 `E:\Qt\Tools\mingw1310_64\bin\gcc.exe`，
+> 也可 `--gcc <path>` 指定）。已接入 `tools/build.ps1 -Target test`。
 
 ### 2. STM32 固件
 
@@ -130,12 +140,18 @@ cmake --build D:\glc\qtapp\build
 
 ### 4. llama.cpp（外部依赖，已存在）
 
+服务管理脚本（含 `重启.cmd`）都在 `D:\llama.cpp\模型启动\`，日志落 `D:\llama.cpp\logs\server.log`：
+
 ```bash
-D:\llama.cpp\模型启动\启动.cmd        # 8092，router 模式（模型按需加载）
+D:\llama.cpp\模型启动\启动.cmd        # 启动：8092，router 模式（模型按需加载）
+D:\llama.cpp\模型启动\状态.cmd        # 查看服务是否在跑
+D:\llama.cpp\模型启动\停止.cmd        # 停止
 curl http://127.0.0.1:8092/health    # {"status":"ok"}
 ```
 
 演示前先预热一次请求（router 模式下首次请求含权重加载时间）。
+
+> 服务状态判据、router 模式与"工具会抢端口"的坑见 `docs/lessons.md#ports`。
 
 ## 运行
 
@@ -166,6 +182,23 @@ py tools\simulate_node.py --id 2 --port 9092
 4. PC 建议设静态 IP 或 DHCP 保留，避免 IP 变化后节点配置失配
 5. 上电后应看到：LCD 显示光强/阈值/执行器/模式；LED0 每 5 s 翻转（心跳）；手电照射 → `light` 上升 → 超阈值时执行器吸合 + 蜂鸣器响；遮挡回落到 `th - hys` 以下才释放
 
+### 硬件在环验证（不依赖 Qt 界面）
+
+板子是 TCP **客户端**，Qt 是服务端；要独立验证固件时，用探针自己当服务端 —— 既能逐帧看到板子
+真实发出的 `report` / `ack` / `evt`，又能主动下发指令并核对回执：
+
+```powershell
+py tools\hil_probe.py                  # 监听 0.0.0.0:9092，跑完整指令序列并打印 PASS/FAIL
+py tools\hil_probe.py --listen-only    # 只听不发，纯观察上报流
+py tools\hil_probe.py --port 9092 --duration 24
+```
+
+自动核对：上报周期 ≈1 s、每帧 `light == 4095 - adc`、不变式 `0 <= hys < th <= 4095`、
+非法 `set_th` 回 `err` 且不改阈值、**手动优先**不被自动逻辑回弹、`auto` 切回自动。
+
+> ⚠ **不可与 Qt 上位机同时运行**（两者都绑 9092）；端口须与固件 `wifi_config.h` 的
+> `TCP_SERVER_PORT` 一致。
+
 ### 历史数据落盘（CSV）
 
 PRD「数据组织 · 数据存储」要求"历史数据：Qt 端 CSV 或 SQLite 落盘，便于绘制长期曲线"。
@@ -186,6 +219,27 @@ PRD「数据组织 · 数据存储」要求"历史数据：Qt 端 CSV 或 SQLite
 | 入仓 | 数据文件**不入仓**（`.gitignore` 含 `*.csv`）；`csvlogger.h/.cpp` 等代码与本文档入仓 |
 
 > 只记 `report`；`ack`/`evt` 不入盘（`evt` 只带 `adc`/`light`，`ack` 是同一状态的回执，重复留档无新信息）。
+
+## 交付打包（交作业 / 发群）
+
+**★ 不要右键压缩目录 ★** —— `.gitignore` 只保护 git 仓库，保护不了"把目录打成 zip 发出去"；
+`firmware/Core/Inc/wifi_config.h` 里的真实 WiFi SSID / 密码会随包带走。
+
+```powershell
+py tools\package_submission.py                  # 源码包 submission_src.zip
+py tools\package_submission.py --docs-only      # 只打包文档（*.md + docs/），体积更小
+py tools\package_submission.py -o D:\提交.zip   # 指定输出路径
+```
+
+打包走 `git archive HEAD` —— 只导出**受版本控制**的文件，而 `wifi_config.h` 从未进入任何提交，
+所以**从原理上不可能进包**（比"人工核对"可靠）。打包后脚本还会自校验：
+
+1. **路径级**：包内不得出现 `wifi_config.h` / `.env` / `*.uvoptx` / `*.uvguix.*` /
+   `firmware/Output/` / `qtapp/build/` / `_attic/` / `__pycache__` / `.log` / `.git/`；
+2. **内容级**：从本地 `wifi_config.h` 取出真实 SSID / 密码 / PC IP，在包内**全文搜索**，
+   命中即判失败，并**自动删除已生成的包**。
+
+提交前的自检清单（`git status --porcelain` 为空、`wifi_config.h` 被 `.gitignore` 命中）见 `AGENTS.md` §八。
 
 ## 里程碑状态
 
