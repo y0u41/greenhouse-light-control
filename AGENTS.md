@@ -395,11 +395,54 @@ greenhouse/
 
 ## 提交与协作
 
+> **状态：已生效。** 本仓库已于本次审计中 `git init`（分支 `main`），
+> 以下规范从"纸面描述"变为**可执行**。此前的"修订记录"是手工模拟的 changelog，
+> 现在请以 `git log` 为准。
+
 - 分支：`main`（保护分支）、`feat/<主题>`、`fix/<主题>`
 - 提交信息：Conventional Commits（feat / fix / docs / refactor / test / chore）
 - 一个提交只做一件事，不混入无关的格式化改动
 - PR 描述写清：改了什么、为什么、怎么验证、影响哪些文档
 - 固件与 Qt 代码分开提交，不混在一个 commit
+
+### 基线提交（不要 rebase / 不要 force push 掉它们）
+
+| 提交 | 内容 |
+|---|---|
+| `9defdeb` | 建立版本控制基线：327 文件全量入仓（**含当时尚未清理的 `_attic/`**） |
+| `06aa657` | 删除 6.8 MB 历史遗留副本与参考工程残留（155 文件删除） |
+
+基线提交里刻意保留了清理前的 `_attic/`，**目的就是让那次删除可完全恢复**：
+
+```bash
+git checkout 9defdeb -- _attic/          # 取回全部历史遗留副本
+git checkout 9defdeb -- _attic/BSP_LED   # 只取回某一个
+```
+
+### ★ 交付 / 交作业必须用 `git archive`，不要右键压缩目录 ★
+
+`.gitignore` 只保护 git 仓库，**保护不了"把目录打 zip 发群里"**。
+`firmware/Core/Inc/wifi_config.h` 里是真实的 WiFi SSID/密码，
+一旦整目录打包就会随包带走 —— 这是 `.gitignore` 无能为力的场景。
+
+正确做法（密钥从原理上不可能入包，因为该文件从未进入任何提交）：
+
+```bash
+python tools/package_submission.py               # 生成 submission_src.zip
+python tools/package_submission.py --docs-only   # 只打包文档
+```
+
+该脚本在打包后**自己校验一遍**：① 列包内文件、确认无 `wifi_config.h` /
+`.uvoptx` / `Output/` / `qtapp/build/` 等禁止项；② 从本地 `wifi_config.h`
+取出真实 SSID 与密码，在包内**全文搜索**确认零命中。校验失败会自动删包。
+
+### 提交前自检
+
+```bash
+git status --porcelain                    # 应为空
+git check-ignore -v firmware/Core/Inc/wifi_config.h   # 必须命中 .gitignore
+git log --all --pretty=format: --name-only | grep wifi_config   # 应只有 .example
+```
 
 ## 完成定义（DoD）
 
