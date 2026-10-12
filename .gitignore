@@ -1,0 +1,46 @@
+# ---- 构建产物 ----
+build/
+cmake-build-*/
+*.o
+*.obj
+*.d
+*.elf
+*.bin
+*.hex
+*.map
+*.lst
+*.crf
+*.axf
+
+# ---- Keil MDK 产物与用户态文件 ----
+# Output/ 是 Keil 的产物目录（.o/.axf/.hex/.map/.htm/.dep 全在里面）
+firmware/Output/
+firmware/Projects/MDK-ARM/DebugConfig/
+firmware/Projects/MDK-ARM/build.log
+*.uvguix.*
+*.uvoptx
+*.dep
+*.lnp
+*.htm
+*.build_log.htm
+*.scvd
+JLinkLog.txt
+*.iex
+*.bak
+
+# ---- 本地密钥与配置（绝不可入仓） ----
+firmware/Core/Inc/wifi_config.h
+.env
+
+# ---- 运行时数据（历史数据/日志落本地，不入仓） ----
+*.csv
+*.sqlite
+*.db
+*.log
+__pycache__/
+*.pyc
+
+# ---- 系统 ----
+Thumbs.db
+desktop.ini
+.DS_Store

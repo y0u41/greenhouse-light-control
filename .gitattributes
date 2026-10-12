@@ -1,0 +1,42 @@
+# 行尾与二进制属性统一
+#
+# 为什么需要这个文件：本工程是 Windows + Keil MDK + Qt/MinGW 混合环境，
+# 且同一批源码里既有 UTF-8（Core/）也有 GBK（Drivers/BSP/LCD 等遗留驱动）。
+# 不锁定行尾时，只要 git 的 core.autocrlf 在某台机器上不同，
+# 同一个文件就会产生"整文件全改"的假 diff，把真正的改动淹没掉。
+#
+# 注意：git 只规范化**行尾**，不会碰**字符编码** —— GBK 源码不会被转换。
+
+# 默认：按内容自动识别文本，检出为 CRLF（Keil / Windows 工具链期望）
+* text=auto eol=crlf
+
+# 文档与脚本：LF（跨平台工具、Markdown 渲染更稳）
+*.md    text eol=lf
+*.py    text eol=lf
+*.sh    text eol=lf
+.gitignore   text eol=lf
+.gitattributes text eol=lf
+
+# 字节精确文件：禁止任何转换
+*.hex   -text
+*.axf   -text
+*.bin   -text
+*.elf   -text
+*.o     -text
+*.obj   -text
+*.a     -text
+*.png   -text
+*.jpg   -text
+*.jpeg  -text
+*.gif   -text
+*.pdf   -text
+*.docx  -text
+*.xlsx  -text
+*.pptx  -text
+
+# GBK 编码的遗留驱动源码：按文本处理（仅规范化行尾），但标注出来提醒后来者
+firmware/Drivers/BSP/LCD/*.c    text eol=crlf
+firmware/Drivers/BSP/LCD/*.h    text eol=crlf
+firmware/Drivers/SYSTEM/sys/*.c text eol=crlf
+firmware/Drivers/SYSTEM/sys/*.h text eol=crlf
+firmware/Core/Inc/stm32f1xx_hal_conf.h text eol=crlf
