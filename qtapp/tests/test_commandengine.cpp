@@ -10,7 +10,9 @@
 //     （commandengine.cpp 的行号记在用例的 rule 字段里）。
 //  3) ★ 一致性守卫：同一张表喂给 Proto/CommandEngine，再与 tools/
 //     validate_parity_python.json（由 protocol_schema.validate_cmd 生成）逐条
-//     比对 判定 + why 文本。两侧不一致时这里红灯，**不修改任何一侧去粉饰**。
+//     比对**判定**。判定不一致时这里红灯，**不修改任何一侧去粉饰**。
+//     why 文案差异按已拍板口径降级为 informational（打印但不算失败），
+//     台账见 qtapp/tests/README.md「已知文案差异（非规则分叉，不影响判定）」。
 //
 // QTEST_APPLESS_MAIN：validate/buildCmd 是纯静态函数，不需要 QObject 事件循环，
 // 也不需要 QApplication（无 GUI）。用 QProcess 起 Python 也不需要事件循环（同步 API）。
@@ -182,7 +184,8 @@ QVector<Case> loadCases(QString *err)
 }
 
 // ---------- why 文案归属检查 ----------
-// 仅用于"哪条分支给出的原因"的归属断言；两侧 why 文本是否逐字相同交给 parity 用例。
+// 仅用于"哪条分支给出的原因"的归属断言；两侧 why 文案差异由 parityWithPythonSchema
+// 打印为 informational（不判失败，见该用例注释里的比对口径）。
 enum class WhyKind {
     None,          // 不检查（成功用例）
     ActionProblem, // 分支 1/2：缺少 action 或未知动作
@@ -432,8 +435,16 @@ void TestCommandEngine::buildCmd()
 // =====================================================================
 
 // 同一张用例表 -> C++ CommandEngine::validate 与
-// Python protocol_schema.validate_cmd，逐条比对 判定 + why 文本。
-// 任何不一致都直接失败，**不改任何一侧**。
+// Python protocol_schema.validate_cmd，逐条比对**判定**。
+//
+// ★ 比对口径（已拍板）★
+//   - 判定不同 -> 必须 FAIL。这是契约：commandengine.h 承诺"校验规则完全一致"，
+//     规则指判定。两侧对同一条指令给出不同结论就是真分叉，不允许放松。
+//   - why 文案不同 -> 只作为 informational 输出（qInfo），**不判失败**。
+//     why 是给人看的 UI 文案，不是协议语义；已知的固定文案差异台账记在
+//     qtapp/tests/README.md「已知文案差异（非规则分叉，不影响判定）」一节。
+//     不判失败 ≠ 不知道：差异仍然逐条打印，改了 why 文案在这里看得见。
+// 任何一侧改规则都仍会让本用例红灯，**不改任何一侧去粉饰**。
 void TestCommandEngine::parityWithPythonSchema()
 {
     const QString casesPath = testCaseFile();
@@ -445,10 +456,10 @@ void TestCommandEngine::parityWithPythonSchema()
 
     QCOMPARE(records.size(), m_cases.size());
 
-    QStringList verdictDiffs;   // P1：判定不一致（真 bug）
-    QStringList whyDiffs;       // P2：失败路径 why 文本不一致
-    QStringList benignDiffs;    // P3：成功路径 why 写法约定不同（非规则分叉）
-    QStringList missing;        // 用例表里有、Python 快照里没有
+    QStringList verdictDiffs;      // P1：判定不一致（真 bug，FAIL）
+    QStringList whyFailDiffs;      // P2：失败路径 why 文案不一致（informational）
+    QStringList whyOkDiffs;        // P3：成功路径 why 写法约定不同（informational）
+    QStringList missing;           // 用例表里有、Python 快照里没有（FAIL）
 
     QHash<QString, SnapRecord> pyById;
     for (const QJsonValue &v : records) {
@@ -490,53 +501,65 @@ void TestCommandEngine::parityWithPythonSchema()
                                           c.rule);
             if (cppOk) {
                 // 成功路径：C++ 约定"成功不写 why"，Python 约定"成功返回 ok"。
-                // 这是返回值约定的差别，不是规则分叉，单列一档，避免淹没真差异。
-                benignDiffs << line;
+                // 这是返回值约定的差别，不是规则分叉。
+                whyOkDiffs << line;
             } else {
-                whyDiffs << line;
+                whyFailDiffs << line;
             }
         }
     }
 
+    // ---- informational：why 文案差异（不算失败，但必须看得见）----
+    if (!whyFailDiffs.isEmpty() || !whyOkDiffs.isEmpty()) {
+        qInfo().noquote() << QStringLiteral("【已知文案差异（非规则分叉，不影响判定）】"
+                                            " why 文案不同 %1 条；判定与协议语义无关，"
+                                            "仅 UI 提示措辞不同：")
+                                 .arg(whyFailDiffs.size() + whyOkDiffs.size());
+        if (!whyFailDiffs.isEmpty()) {
+            qInfo().noquote() << QStringLiteral("  · 失败路径 why 措辞不同：%1 条")
+                                     .arg(whyFailDiffs.size());
+            for (const QString &l : whyFailDiffs) {
+                qInfo().noquote() << QStringLiteral("    - ") + l;
+            }
+        }
+        if (!whyOkDiffs.isEmpty()) {
+            qInfo().noquote() << QStringLiteral("  · 成功路径 why 写法约定不同"
+                                                "（C++ 留空 / Python 返回 \"ok\"）：%1 条")
+                                     .arg(whyOkDiffs.size());
+            for (const QString &l : whyOkDiffs) {
+                qInfo().noquote() << QStringLiteral("    - ") + l;
+            }
+        }
+        qInfo().noquote() << QStringLiteral("  台账：qtapp/tests/README.md"
+                                            "「已知文案差异（非规则分叉，不影响判定）」");
+    } else {
+        qInfo().noquote() << QStringLiteral("一致性守卫：%1 条用例的判定与 why 文本逐条一致")
+                                 .arg(m_cases.size());
+    }
+
+    // ---- 硬门槛：判定必须一致 ----
     if (!missing.isEmpty()) {
         QFAIL(qPrintable(QStringLiteral("Python 快照缺少用例（用例表与快照不同步，"
                                         "请重跑 tools/check_validate_parity.py --write）：\n  %1")
                              .arg(missing.join(QStringLiteral("\n  ")))));
     }
 
-    if (!benignDiffs.isEmpty()) {
-        qInfo().noquote() << QStringLiteral("【P3 约定差异，非规则分叉】%1 条：成功时 C++ 不写 why、"
-                                            "Python 返回 \"ok\"。两侧判定完全一致：")
-                                 .arg(benignDiffs.size());
-        for (const QString &l : benignDiffs) {
-            qInfo().noquote() << QStringLiteral("  - ") + l;
-        }
-    }
-
-    if (!verdictDiffs.isEmpty() || !whyDiffs.isEmpty()) {
+    if (!verdictDiffs.isEmpty()) {
         QStringList msg;
-        msg << QStringLiteral("★ 发现 C++ 与 Python 校验规则分叉（未做任何粉饰）★");
-        if (!verdictDiffs.isEmpty()) {
-            msg << QStringLiteral("")
-                << QStringLiteral("【P1 判定不一致】%1 条 —— 这是真 bug，两侧对同一条指令给出不同结论：")
-                       .arg(verdictDiffs.size());
-            msg << verdictDiffs;
-        }
-        if (!whyDiffs.isEmpty()) {
-            msg << QStringLiteral("")
-                << QStringLiteral("【P2 why 文本不一致（失败路径）】%1 条 —— 判定相同但提示文案分叉，"
-                                  "UI 提示将与契约文档/固件不符：")
-                       .arg(whyDiffs.size());
-            msg << whyDiffs;
-        }
+        msg << QStringLiteral("★ 发现 C++ 与 Python 判定分叉（未做任何粉饰）★")
+            << QStringLiteral("")
+            << QStringLiteral("【判定不一致 · FAIL】%1 条 —— 这是真 bug，两侧对同一条指令"
+                              "给出不同结论（契约就是判定）：")
+                   .arg(verdictDiffs.size());
+        msg << verdictDiffs;
         msg << QStringLiteral("")
-            << QStringLiteral("另有 %1 条 P3 约定差异（成功路径 why 写法不同，非规则分叉），"
-                              "详见上方 QINFO。")
-                   .arg(benignDiffs.size());
+            << QStringLiteral("（另有 %1 条 why 文案差异属 informational，不影响判定，详见上方 QINFO）")
+                   .arg(whyFailDiffs.size() + whyOkDiffs.size());
         QFAIL(qPrintable(msg.join(QLatin1Char('\n'))));
     }
 
-    qInfo().noquote() << QStringLiteral("一致性守卫：%1 条用例的判定与 why 文本逐条一致")
+    qInfo().noquote() << QStringLiteral("一致性守卫：%1 条用例的**判定**逐条一致"
+                                        "（why 文案差异另计，不判失败）")
                              .arg(m_cases.size());
 }
 

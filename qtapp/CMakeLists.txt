@@ -146,7 +146,8 @@ if(GREENHOUSE_BUILD_TESTS)
              COMMAND ${TEST_TARGET}
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
-    # 跨语言一致性守卫的显式入口：Python 侧单独跑一遍（给人看的 diff，恒退出 0）
+    # 跨语言一致性守卫的显式入口：Python 侧单独跑一遍（给人看的 diff）。
+    # 退出码：判定不一致 -> 1（ctest 变红）；仅 why 文案差异 -> 0（informational）。
     # 解释器默认用本机 DSH 运行时自带的 Python；可用 -DGREENHOUSE_PYTHON=... 覆盖。
     set(GREENHOUSE_PYTHON
         "C:/Users/t3205/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/python.exe"

@@ -61,10 +61,33 @@ bool CommandEngine::validate(const QJsonObject &cmd, int hys, QString *why)
             }
             return false;
         }
-        const int n = v.toInt();
+        /* ★ 必须逐字镜像 Python 的**运算顺序**：先截断取整，再检查量程 ★
+         * 分叉修复（由 qtapp/tests/test_commandengine.cpp 的跨语言一致性用例定位）：
+         *   QJsonValue::toInt() 对**非整数 double**（如 2000.9）**不转换、直接返回默认值 0**，
+         *   于是 2000.9 被当成 0 -> 0 <= hys -> **拒绝**；
+         *   而 Python 的 int(2000.9)=2000、固件 protocol.c 的 (int32_t)jval->valueint=2000
+         *   —— 两者都**放行**。三套规则出现分歧，Qt 是离群的一方。
+         * commandengine.h 承诺"与 tools/protocol_schema.py::validate_cmd 完全一致"，
+         * 故此处对齐 Python 与固件的共同语义。
+         *
+         * ★ 顺序不能改 ★ 对应 protocol_schema.py:93-97：
+         *       v = int(value)                       # 先截断（向零取整）
+         *       if v < 0 or v > ADC_MAX: 拒绝        # 再检查量程
+         *       if v <= hys: 拒绝
+         * 若把量程检查改到 double 域（写成 `if (d < 0.0 ...)`）会**引入新的分叉**：
+         * value = -0.5 时 Python 的 int(-0.5) = 0 落在量程内、继续往下判，
+         * 而 double 域会直接以"超出量程"拒绝 —— 判定结果相反。
+         * 这个坑我第一版就踩了，由 parityWithPythonSchema 用例抓出来。
+         *
+         * 超大值先夹到 int 可表示范围：仅为避免 static_cast 的未定义行为，
+         * 夹取后必然超量程、判定不变（Python 侧是大整数比较，同样拒绝）。 */
+        double dc = v.toDouble();
+        if (dc > 2147483647.0)  { dc = 2147483647.0; }
+        if (dc < -2147483648.0) { dc = -2147483648.0; }
+        const int n = static_cast<int>(dc);            /* 与 Python int() 同语义的截断 */
         if (n < 0 || n > Proto::ADC_MAX) {
             if (why != nullptr) {
-                *why = QStringLiteral("阈值 %1 超出 ADC 量程 0-4095").arg(n);
+                *why = QStringLiteral("阈值 %1 超出量程 0-4095").arg(n);
             }
             return false;
         }

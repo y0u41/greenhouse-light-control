@@ -40,51 +40,84 @@ ctest --test-dir D:\glc\qtapp\build --output-on-failure
 python tools/check_validate_parity.py --write
 ```
 
-## ★ 当前红灯：已确认的 C++ / Python 规则分叉
+## ★ 一致性守卫：口径与现状
 
-`parityWithPythonSchema` 目前**故意保持失败**。它拿同一张用例表分别喂给
-`CommandEngine::validate` 与 `protocol_schema.validate_cmd`，比对判定与 why 文本。
-这些差异是真实存在的，**没有修改任何一侧去让它变绿**。
+`parityWithPythonSchema` 拿同一张用例表分别喂给 `CommandEngine::validate` 与
+`protocol_schema.validate_cmd`，**比对判定**。口径（已拍板）：
 
-### P1 判定不一致（1 条，真 bug）
+- **判定不同 → FAIL（硬门槛）。** `commandengine.h` 承诺的是"**校验规则**完全一致"，
+  规则指**判定**。两侧对同一条指令给出不同结论就是真分叉，不允许放松。
+- **`why` 文案不同 → informational。** 只打印（QINFO / Python 侧 stdout）不判失败。
+  `why` 是给人看的 **UI 文案**，不是协议语义。
+- 判定一致 ≠ 看不见文案差异：差异仍逐条打印，并登记在本节台账里。
 
-| 用例 | 指令 | hys | C++ | Python |
-| --- | --- | --- | --- | --- |
-| `set_th_value_float_noninteger_rejected` | `{"action":"set_th","value":2000.9}` | 150 | `false`（why=阈值 0 必须大于回差 150） | `true`（why=ok） |
+`ctest` 现状：**2/2 passed**，Qt 测试 `Totals: 47 passed, 0 failed`（33 条用例 × 判定 +
+9 条 buildCmd + 5 个框架用例）。
 
-根因：`qtapp/src/commandengine.cpp:64` 用 `const int n = v.toInt();`。
-Qt 的 `QJsonValue::toInt()` 对**非整数 double 不转换、直接返回 0**
-（默认参数 `defaultValue = 0`），所以 `2000.9` 被当成 `0`，`0 <= 150` → 拒绝。
-Python 侧 `int(2000.9)` 得 `2000` → 放行。
+守卫**不会退化成永远绿灯**（这是本口径最需要证明的一点）：把任一条用例的 `expect`
+改错、或改 `commandengine.cpp` 的任一边界，`commandengine` 与 `protocol_parity_python`
+都会立刻变红。实测方式：
 
-影响面：Qt 自身的下发路径走 `buildCmd(nodeId, action, int value)`，
-写入的 `value` 一定是整数，因此**当前线上路径不会命中**；
-只有外部 JSON（未来新增的输入源）把非整数阈值送进 `validate` 时才会暴露。
-如果要对齐，应改成 `v.toDouble()` 再按明确规则取整——但那是行为变更，需先确认预期语义。
+```powershell
+# 1) 故意把 tools/validate_cases.json 里 set_th_hys150_value_hys_plus_1 的 expect 改成 false
+#    -> ctest 变红（【判定不一致 · FAIL】）
+# 2) 改回 true -> ctest 变绿
+```
 
-### P2 失败路径 why 文本不一致（6 条）
+### 已修复的判定分叉（原 P1，1 条）
 
-| 用例 | C++ why | Python why |
+用例 `set_th_value_float_noninteger_truncated`（原名 `..._noninteger_rejected`，
+`{"action":"set_th","value":2000.9}`，hys=150）：
+
+| 侧 | 修前 | 修后 |
 | --- | --- | --- |
-| `action_empty_string` | 缺少 action 字段 | 未知动作：（空） |
-| `action_non_string_number` | 缺少 action 字段 | 未知动作：1 |
-| `set_th_hys150_value_negative` | 阈值 -1 超出 **ADC 量程** 0-4095 | 阈值 -1 超出**量程** 0-4095 |
-| `set_th_hys150_value_adc_max_plus_1` | 阈值 4096 超出 **ADC 量程** 0-4095 | 阈值 4096 超出**量程** 0-4095 |
-| `set_th_hys150_value_huge` | 阈值 99999 超出 **ADC 量程** 0-4095 | 阈值 99999 超出**量程** 0-4095 |
-| `set_th_value_float_at_hys_rejected` | 阈值 0 必须大于回差 150 | 阈值 150 必须大于回差 150 |
+| C++（旧 `v.toInt()`） | `false`（2000.9 被当成 0 → `0 <= 150`） | `true`（向零截断得 2000） |
+| Python `int(2000.9)` | `true` | `true` |
+| 固件 `protocol.c` 的 `(int32_t)` | `true` | `true` |
 
-判定全部相同，只是文案不同；其中最后一条是 P1 那个 `toInt()` 的连带后果。
-前两类是"空/非字符串 action 算缺失还是算未知"的分支归属差异。
+Python 是声明的单一事实源，固件也同意向零截断，离群的是 Qt。`commandengine.cpp`
+已改为**逐字镜像 Python 的运算顺序**（先截断 → 再查量程 → 再比回差），用例期望同步改为
+`true`、用例名去掉 `_rejected`。
 
-### P3 约定差异（13 条，不是规则分叉）
+## 已知文案差异（非规则分叉，不影响判定）
 
-成功路径：C++ 约定"不传 `why` 指针就不写、传了也留空"，Python 约定"成功返回 `ok`"。
-13 条成功用例全属此类，判定 100% 一致，测试把它单列一档以免淹没上面的真差异。
+> **这份台账是有价值的知识，不是因为不再判失败就可以删的东西。** 它记录了"同一判定、
+> 两种措辞"的完整清单，供将来统一 UI 文案时参考；文案差异仍然在每次 `ctest` 里逐条打印。
+
+### A. 失败路径措辞差异（2 条，**仍在**）
+
+| 用例 | C++ why | Python why | 性质 |
+| --- | --- | --- | --- |
+| `action_empty_string` | 缺少 action 字段 | 未知动作：（空） | 分支归属差异：空串算"缺失"还是"未知" |
+| `action_non_string_number` | 缺少 action 字段 | 未知动作：1 | `QJsonValue::toString()` 得空串 vs Python `str(1)` 非空 |
+
+两条判定同为 `false`，只是措辞与分支归属不同。
+
+### B. 失败路径措辞差异（4 条，**已随截断修复收敛**）
+
+历史台账原有 **6** 条 why 差异，其中这 4 条是旧 `v.toInt()` 的连带后果；C++ 改成
+向零截断（并去掉文案里多余的 "ADC" 字样）后已与 Python 逐字一致。保留在此以免知识丢失：
+
+| 用例 | 历史 C++ why | Python why | 现状 |
+| --- | --- | --- | --- |
+| `set_th_hys150_value_negative` | 阈值 -1 超出 **ADC 量程** 0-4095 | 阈值 -1 超出**量程** 0-4095 | 已一致 |
+| `set_th_hys150_value_adc_max_plus_1` | 阈值 4096 超出 **ADC 量程** 0-4095 | 阈值 4096 超出**量程** 0-4095 | 已一致 |
+| `set_th_hys150_value_huge` | 阈值 99999 超出 **ADC 量程** 0-4095 | 阈值 99999 超出**量程** 0-4095 | 已一致 |
+| `set_th_value_float_at_hys_rejected` | 阈值 0 必须大于回差 150 | 阈值 150 必须大于回差 150 | 已一致（C++ 现亦截断为 150） |
+
+即：6 条历史差异 = 2 条仍在（上表 A）+ 4 条已收敛（本表 B）。
+
+### C. 成功路径返回值约定差异（14 条，非规则分叉）
+
+C++ 约定"成功不写 `why`"（保持空串），Python 约定"成功返回 `ok`"。33 条用例中 14 条
+成功用例全属此类，判定 100% 一致。测试把它单列一档，避免淹没真正的判定差异。
 
 ## 边界语义（已在用例里钉住，与 `commandengine.cpp` 现行行为一致）
 
 - `action` 缺失/空/null → false，why="缺少 action 字段"
 - 6 个合法动作：`relay_on` `relay_off` `auto` `set_th` `get_state` `alarm_test`；`query` 必须被拒
-- `set_th`：必须有 `value`、必须 `isDouble()`、`0 <= n <= 4095`、**`n > hys`（严格大于）**
+- `set_th`：必须有 `value`、必须 `isDouble()`、**先向零截断取整**、`0 <= n <= 4095`、**`n > hys`（严格大于）**
+- 非整数 `value`（如 `2000.9`）→ 截断为 `2000`，**放行**（与 Python `int()`、固件 `(int32_t)` 一致）
+- `-0.5` → 截断为 `0`（**向零，不是 floor**），故 hys=-10 时放行；这也钉死了"必须先截断再查量程"
 - `hys=0` 时 `value=0` → false，`value=1` → true
 - 非 `set_th` 动作即使带越界 `value` 也不校验

@@ -5,8 +5,15 @@ protocol_schema.validate_cmd，产出"Python 侧真实判定"快照，供 Qt 侧
 
 背景：commandengine.h 顶部承诺"校验规则与 tools/protocol_schema.py::validate_cmd
 完全一致"，但此前没有任何机制在强制它。qtapp/tests/test_commandengine.cpp 会用
-<b>同一张用例表</b>跑 C++ 的 CommandEngine::validate，再与本脚本产出的快照逐条比对
-（含 why 文本）。任一侧改规则、本脚本未重跑，Qt 测试会显式报出快照过期。
+<b>同一张用例表</b>跑 C++ 的 CommandEngine::validate，再与本脚本产出的快照逐条比对。
+任一侧改规则、本脚本未重跑，Qt 测试会显式报出快照过期。
+
+★ 比对口径（已拍板，与 Qt 侧 parityWithPythonSchema 一致）★
+    - 契约 = **判定**（true/false）。判定不同 -> 必须 FAIL（本脚本报告模式返回 1）。
+    - why 文案不同 -> **只作为 informational 输出**，不判失败。
+      理由：commandengine.h 承诺的是"校验规则一致"，规则指判定；why 是给人看的
+      UI 文案，不是协议语义。已知的 C++/Python 文案差异台账见
+      qtapp/tests/README.md「已知文案差异（非规则分叉，不影响判定）」一节。
 
 两种用法：
 
@@ -15,13 +22,14 @@ protocol_schema.validate_cmd，产出"Python 侧真实判定"快照，供 Qt 侧
        python tools/check_validate_parity.py --emit-json
        python tools/check_validate_parity.py --write      # 直接写回 --snapshot 指定的文件
 
-2) 比对模式（给人看的 diff，不改任何东西，始终退出码 0）：
+2) 比对模式（给人看的 diff，不改任何东西）：
 
        python tools/check_validate_parity.py tools/validate_cases.json
 
 退出码约定：
     --emit-json / --write  -> 0 成功，1 用例表或 schema 加载失败
-    比对模式               -> 恒为 0（纯报告；不一致只打印清单）
+    比对模式               -> 0 = 判定逐条一致（why 差异仅提示）；
+                              1 = 存在**判定**不一致（真分叉，必须修）
 
 注意：本脚本 <b>不修改</b> protocol_schema.py，只读它。发现不一致时如实报告。
 """
@@ -64,7 +72,10 @@ def _load_cases(path):
 
 
 def run_cases(cases):
-    """对每条用例调用协议单一事实源的 validate_cmd，返回结果列表。"""
+    """对每条用例调用协议单一事实源的 validate_cmd，返回结果列表。
+
+    `why` 是可选的"文案期望"字段，只用于 informational 比对，缺失不报错。
+    """
     results = []
     for c in cases:
         ok, why = schema.validate_cmd(c["cmd"], int(c["hys"]))
@@ -73,6 +84,7 @@ def run_cases(cases):
             "expect": bool(c["expect"]),
             "actual": bool(ok),
             "why": why,
+            "why_expect": c.get("why", ""),
             "note": c.get("note", ""),
             "rule": c.get("rule", ""),
         })
@@ -98,35 +110,55 @@ def build_snapshot(cases_path):
 
 
 def _report(cases_path):
-    """比对模式：打印 P1（判定不一致）与 P2（判定相同但 why 文本不同）清单。"""
+    """比对模式。
+
+    判定不一致（Python validate_cmd 的 actual != 用例表 expect，而 expect 代表
+    C++ CommandEngine::validate 的现行语义）-> 返回 1，ctest 变红。
+    why 文案不一致 -> 只打印，不判失败（见模块 docstring 的比对口径）。
+    """
     snap = build_snapshot(cases_path)
     records = snap["records"]
 
     verdict_mismatch = [r for r in records if r["actual"] != r["expect"]]
-    python_vs_table = [r for r in records if r["actual"] != r["expect"]]
+    # 用例表里的 why 是可选字段；只有登记了才比对，且永远只是提示。
+    why_notice = [r for r in records if r["why_expect"] and r["why"] != r["why_expect"]]
+    why_registered = [r for r in records if r["why_expect"]]
 
-    # 本文件只能看到 Python 一侧；"两侧判定差异"由 Qt 测试负责报出。
-    # 这里能报的是：Python 自己的判定 vs 用例表登记的 expect（= C++ 现行语义）。
     print("用例数: %d   (source: %s, schema hys_default=%d, adc_max=%d)"
           % (snap["case_count"], snap["cases_source"], snap["hys_default"], snap["adc_max"]))
+    print("比对口径: 判定 = 契约（不一致即 FAIL）；why 文案 = informational（不影响退出码）")
 
-    if python_vs_table:
+    if verdict_mismatch:
         print("")
-        print("!! Python validate_cmd 判定 与 用例表 expect（= C++ CommandEngine::validate 现行语义）"
-              "不一致：%d 条" % len(python_vs_table))
-        for r in python_vs_table:
+        print("!! 【判定不一致 · FAIL】Python validate_cmd 判定 与 用例表 expect"
+              "（= C++ CommandEngine::validate 现行语义）不一致：%d 条" % len(verdict_mismatch))
+        for r in verdict_mismatch:
             print("   - %-42s expect=%s  python=%s   why=%r"
                   % (r["id"], r["expect"], r["actual"], r["why"]))
             print("     note: %s   rule: %s" % (r["note"], r["rule"]))
     else:
-        print("Python validate_cmd 判定与用例表 expect 逐条一致（%d/%d）。"
+        print("判定一致：Python validate_cmd 与用例表 expect 逐条相同（%d/%d）。"
               % (snap["case_count"], snap["case_count"]))
 
     print("")
-    print("提示：两侧的 why 文本差异由 qtapp/tests/test_commandengine.cpp 的 "
-          "parity_* 用例负责报出（Qt 侧会调本脚本的 --emit-json）。")
+    if why_notice:
+        print("[informational] why 文案与用例表登记的 why 不同（%d 条，不判失败）："
+              % len(why_notice))
+        for r in why_notice:
+            print("   - %-42s python why=%r  表登记 why=%r"
+                  % (r["id"], r["why"], r["why_expect"]))
+    elif why_registered:
+        print("[informational] 用例表登记了 why 的 %d 条，文案与 Python 全部一致（比对但不判失败）。"
+              % len(why_registered))
+    else:
+        print("[informational] 用例表未登记任何 why 期望字段：why 文案不参与本侧比对。")
+
+    print("")
+    print("已知的 C++/Python why 文案差异（非规则分叉，不影响判定）台账见：")
+    print("  qtapp/tests/README.md 「已知文案差异（非规则分叉，不影响判定）」一节；")
+    print("  实时清单由 qtapp/tests/test_commandengine.cpp 的 parityWithPythonSchema 打印。")
     print("      重跑快照： python tools/check_validate_parity.py --write")
-    return 0
+    return 1 if verdict_mismatch else 0
 
 
 def main(argv=None):
