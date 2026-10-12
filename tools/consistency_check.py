@@ -143,6 +143,55 @@ def main() -> None:
     check("'query' 不在任何合法集合中", "query" not in schema_actions | fw_actions | qt_actions)
     check("alarm_test 三处都有（PRD 报警测试按钮）", "alarm_test" in schema_actions | fw_actions | qt_actions)
 
+    # System Prompt 的动作白名单：模型只认提示词里列出的名字，列错/漏列会让模型
+    # 自造动作名（实测出现 set_threshold / threshold），而 CommandEngine::validate
+    # 会直接判"未知动作"拒收 —— 用户表现为"说了没反应"。
+    #
+    # 注意：白名单在 C++ 里是**运行时生成**的（llmclient.cpp 用
+    # Proto::allActionNames() 拼装），源码里没有"可直接正则抽取的动作名字面量"。
+    # 所以本守卫校验的是一条更强的结构不变式 + 两条数组一致性：
+    #   ① LINES[]（提示词每个动作的说明行）与 ACTION_* 一一对应且同序；
+    #   ② allActions() 枚举的正是那些 ACTION_*；
+    #   ③ buildSystemPrompt 的白名单确实由 allActionNames() 生成，且模板里
+    #      保留了白名单段与"不得自造名"约束。
+    llm_c = read(QT / "llmclient.cpp")
+    enum_actions = re.findall(r'ACTION_[A-Z_]+\s*\[\]\s*=\s*"([a-z_]+)"',
+                              actions_h.split("// \u4e0a\u884c type")[0])
+    lines_block = actions_h.split("static const char *const LINES[]", 1)
+    lines_actions = re.findall(r'\{\\"action\\":\\"([a-z_]+)\\"',
+                               lines_block[1] if len(lines_block) > 1 else "")
+    check("protocol_actions.h: 提示词动作说明行 == 动作枚举（同集合）",
+          set(lines_actions) == set(enum_actions),
+          "说明行多/少: %s" % sorted(set(lines_actions) ^ set(enum_actions)))
+    check("protocol_actions.h: 提示词说明行顺序 == 动作枚举顺序",
+          lines_actions == enum_actions,
+          "枚举 %s / 说明行 %s" % (enum_actions, lines_actions))
+    check("System Prompt 白名单由 Proto::allActionNames() 运行时生成（无第二事实源）",
+          "Proto::allActionNames()" in llm_c and "allActions(&n)" in actions_h)
+    check("System Prompt 保留白名单段与\"不得自造动作名\"约束",
+          "【合法动作白名单·只能从这里选】" in llm_c
+          and "只能输出上面这些动作名" in llm_c
+          and "不得自造新名字" in llm_c)
+    check("System Prompt 明确禁止前置叙述（防 reasoning 被当正文）",
+          "禁止输出任何前置叙述" in llm_c)
+    check("System Prompt 给出 set_th 的 value 字段名与量程",
+          "字段名固定为 value" in llm_c and "0 < value <= 4095" in llm_c)
+
+    # QString::arg 的占位符契约：模板里每出现一个未转义的 %N 就消费一个 .arg() 实参，
+    # 实参不够时 Qt 会打印告警并在**运行时中止进程**（不是抛异常）。提示词模板是长
+    # 中文串，日后随手写一个 "占比 80%" 之类的字面量就会踩中 —— 这里按 QString::arg
+    # 的语义（%% 是字面量、%L1 也算占位符）核对占位符数量 == arg() 实参数量。
+    body = read(QT / "llmclient.cpp").split("QString LlmClient::buildSystemPrompt", 1)[1]
+    tmpl = body.split(").arg(", 1)[0]
+    arg_part = body.split(").arg(", 1)[1].split(";", 1)[0]
+    bare = re.findall(r"(?<!%)%L?[0-9]+", tmpl)
+    n_args = arg_part.count(",") + 1
+    check("System Prompt 模板占位符数 == .arg() 实参数（少一个会运行时中止）",
+          len(bare) == n_args,
+          "占位符 %s（%d 个）vs arg() 实参 %d 个" % (bare, len(bare), n_args))
+    check("System Prompt 模板除占位符外无未转义的 % 号",
+          len(re.findall(r"(?<!%)%[^0-9L]", tmpl)) == 0)
+
     print("\n== 2. 阈值 / 回差默认值：固件 / 契约 / Qt 一致 ==")
     fw_th, fw_hys = macro(mainh, "TH_DEFAULT"), macro(mainh, "HYS_DEFAULT")
     sc_th = re.search(r"TH_DEFAULT\s*=\s*(\d+)", schema)
