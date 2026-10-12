@@ -30,7 +30,7 @@ py firmware/prebuild_check.py
 | IWDG **≈6.4 s**（重装值 4000） | `main.c::MX_IWDG_Init()` | **不要**在 CubeMX 启用 IWDG |
 | LCD（FSMC） | 官方 BSP `lcd.c`（或桩） | 仅在引入 BSP 时由 BSP 自理 |
 
-**为什么这样分**：业务模块的 `MX_*_Init()` 调 `HAL_*_Init()` 时会回调弱 `HAL_*_MspInit`。若 CubeMX 也启用了这些外设，生成的 MSP 会再去配同一组 GPIO → 双初始化、引脚被抢、FSMC 时序被破坏（AGENTS 已知陷阱 #3）。让 CubeMX **不启用**这些外设，MSP 就是空桩，业务代码成为唯一 owner。
+**为什么这样分**：业务模块的 `MX_*_Init()` 调 `HAL_*_Init()` 时会回调弱 `HAL_*_MspInit`。若 CubeMX 也启用了这些外设，生成的 MSP 会再去配同一组 GPIO → 双初始化、引脚被抢、FSMC 时序被破坏（引脚主权与执行器归属见 `docs/lessons.md#actuator`）。让 CubeMX **不启用**这些外设，MSP 就是空桩，业务代码成为唯一 owner。
 
 ---
 
@@ -82,7 +82,7 @@ py firmware/prebuild_check.py
 | ② | 打开 `Core/Src/stm32f1xx_it.c`，**删除其中的 `USART3_IRQHandler`**（保留 `SysTick_Handler`） | `USART3_IRQHandler` 已在 `esp8266.c` 定义（经 `ESP_IRQHandler` 宏，`ESP_UART = USART3`），重复会 `multiple definition`。**注**：本仓库现用的 `it.c` 取自官方例程，本身就没有 `USART3_IRQHandler`，无需删；只有 CubeMX 新生成的才要检查 |
 | ③ | 打开 `Core/Src/stm32f1xx_hal_msp.c`，确认 `HAL_ADC_MspInit` / `HAL_I2C_MspInit` / `HAL_UART_MspInit` **为空**（因为第 2 步没启用这些外设，本就空；若被填了引脚代码则清空） | 与业务 `MX_*_Init` 双初始化 |
 | ④ | 拷贝 `Core/Inc/wifi_config.h.example` → `Core/Inc/wifi_config.h`，填真实 SSID / 密码 / 上位机 PC 的局域网 IP | `wifi_config.h` 不入仓；缺失时 `main.c` 用占位值，能编译但连不上网 |
-| ⑤ | `Middlewares/cJSON/` **已随仓库提供，无需另行下载**。把 `cJSON.c` 加入编译、`cJSON.h` 加入 include 路径；**不要**把 `cjson_test.c` 加入工程（它是 PC 端单元测试，含 `main()`，会与固件 `main()` 冲突）。建议把 `startup_stm32f103xe.s` 里的 `Heap_Size` 调到 `0x800` 以上（cJSON 用 `malloc`，解析单帧峰值 < 1KB） | 协议层 `protocol.c` 用 cJSON 解析 |
+| ⑤ | `Middlewares/cJSON/` **已随仓库提供，无需另行下载**。把 `cJSON.c` 加入编译、`cJSON.h` 加入 include 路径；**不要**把 `cjson_test.c` 加入工程（它是 PC 端单元测试，含 `main()`，会与固件 `main()` 冲突）。**`startup_stm32f103xe.s` 的 `Heap_Size` 必须是 `0x1000`**（本仓库实际值；早期文档写的"`0x800` 以上"已过时）：cJSON 是 **`malloc` 型**解析器，每个字符串 / 每个数字 / 每个节点都要分配，一条典型指令约 **300~390 B**，而 `0x200`（512 B）只够 **60~77%** —— 堆不足时 `malloc` 失败 → `cJSON_Parse` 返回 NULL → **整条指令被静默丢弃**。堆预算的实测依据见 `docs/lessons.md#code-invariants` | 协议层 `protocol.c` 用 cJSON 解析 |
 | ⑥ | **LCD：已随仓库提供**（`Drivers/BSP/LCD/lcd.c/.h`，含字库），默认 `LCD_SHOW_ENABLED=1` 可直接编译。若你**不打算接屏**，把 `Core/Inc/main.h` 的 `LCD_SHOW_ENABLED` 改为 `0` 即可编译为桩，采集/控制/上报不受影响 | 默认 `LCD_SHOW_ENABLED=1`，没 BSP 会 `lcd.h: No such file`。`lcd_show.c` 按 V2 BSP 的 `lcd_show_string(x,y,w,h,size,char*,color)` 接口编写，`prebuild_check.py` 会校验 API 形态 |
 
 ---
@@ -145,7 +145,7 @@ Drivers/CMSIS/Device/ST/STM32F1xx/Source/Templates/system_stm32f1xx.c
 | M3-b | 拔 ESP8266 供电 | 本地闭环（采集/显示/报警）不受影响 |
 | M2b | 继电器到位后 | 只换 `control.c` 里 `ACTUATOR_*` 4 行宏 + 接 3 根线，复测 M2-a~c 全部通过 |
 
-> 阶段一用 LED1（PE5）等效执行器；阶段二继电器到位，仅改 `control.c` 的 4 行 `ACTUATOR_*` 宏（`GPIOE/PIN_5` → `GPIOD/PIN_11`），业务代码其余不动。注意 PD11 排针/焊盘不得接其他功能（AGENTS 已知陷阱 #3）。
+> 阶段一用 LED1（PE5）等效执行器；阶段二继电器到位，仅改 `control.c` 的 4 行 `ACTUATOR_*` 宏（`GPIOE/PIN_5` → `GPIOD/PIN_11`），业务代码其余不动。注意 PD11 排针/焊盘不得接其他功能（引脚主权与执行器归属见 `docs/lessons.md#actuator`）。
 
 ---
 

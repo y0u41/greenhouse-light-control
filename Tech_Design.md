@@ -1400,7 +1400,8 @@ void Actuator_Set(uint8_t on)
 
 > **实测记录不在本文件**：编译器版本、Flash/RAM 占用、hex 大小、构建与运行验证、契约测试结果等**实测数据一律由
 > [设计报告.md](设计报告.md) §8.2 记录**（本文件只定义事实，报告只记录实测）。构建路径陷阱（源码路径含中文时
-> Qt AutoMoc 无法写出生成文件，且 8.3 短路径在本机仍是中文）见 [AGENTS.md](AGENTS.md) 已知陷阱第 8 条，
+> Qt AutoMoc 无法写出生成文件，且 8.3 短路径在本机仍是中文）见
+> [`docs/lessons.md#ascii-path`](docs/lessons.md#ascii-path)，
 > `tools/build.ps1` 会自动建立纯 ASCII 目录联接后构建。
 
 ---
