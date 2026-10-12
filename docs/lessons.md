@@ -150,7 +150,7 @@ WRITE_REG(hiwdg->Instance->KR, 0xAAAA)   /* Instance == NULL -> 往 0x00000000 �
 `DBGMCU->CR |= DBGMCU_CR_DBG_IWDG_STOP`（照抄参考工程 `User/App/app_main.c:132`）
 让**调试器暂停 CPU 时冻结看门狗**。
 
-**不加会发生什么**：在 Keil 里一下断点 CPU 就停止喂狗，8 s 后必被复位 ——
+**不加会发生什么**：在 Keil 里一下断点 CPU 就停止喂狗，**≈6.4 s** 后必被复位 ——
 现象是"一进断点就重启、完全没法单步调试"。
 
 **注意**：该宏在部分 CMSIS 头版本里没有定义，故 `main.c` 里自带

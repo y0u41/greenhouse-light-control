@@ -109,6 +109,9 @@
    - 实测证据：`RCC_CSR = 0x3C000002`，其中 **`IWDGRSTF`(bit29) = 1**；
      `IWDG_RLR = 0x4E2 (1250)`、`IWDG_PR = 4 (÷64)` → 1250×64/40000 ≈ 2.0 s
    - 规则：`MX_IWDG_Init()` 只能紧邻 `for(;;)` 之前；开机路径上任何 >1.5 s 的步骤都要重新审视顺序
+   - ⚠ **当前配置已不是 2.0 s**：`Reload = 4000U`、`IWDG_PRESCALER_64`、LSI ≈ 40 kHz → 超时 **≈6.4 s**
+     （上面 2.0 s / `RLR = 1250` 是**当时**踩坑的现场值，保留为历史证据；现"开狗 → 首次喂狗"约 1.2 s，
+     余量约 5×，规则本身不变。修法与依据见 `docs/lessons.md#iwdg-reload-12bit`）
 14. **烧录/调试不必依赖 Keil —— ST 官方工具链已在 VS Code 扩展里解压就绪**
    - 位置：`%LOCALAPPDATA%\stm32cube\bundles\`
    - `STM32_Programmer_CLI.exe`（`programmer\2.23.0\bin\`）——**绕开 Keil 的 ST-Link DLL**，

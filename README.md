@@ -92,7 +92,7 @@ tools/
 
 ```bash
 py tools/contract_test.py              # 11 个契约测试，必须全绿
-py tools/consistency_check.py          # 27 项跨层一致性（固件/Qt/契约/文档 四处对齐）
+py tools/consistency_check.py          # 29 项跨层一致性（固件/Qt/契约/文档 四处对齐）
 py tools/simulate_node.py --selftest   # 虚拟节点状态机自测（含手动优先、断帧残留）
 py firmware/prebuild_check.py          # 固件编译前自检
 ```

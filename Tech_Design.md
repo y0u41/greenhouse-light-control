@@ -39,7 +39,7 @@
 | 显示 | 板载 FSMC LCD 接口 + 3.5 寸 TFTLCD（NT35310，480×320，MCU 屏 16 位并口） |
 | 无线通信 | ESP8266（AT 固件），USART2（PA2/PA3），TCP 透传 |
 | 阈值存储 | 板载 AT24C02 EEPROM（I2C1，PB6/PB7），8 字节布局含魔数与校验和 |
-| 看门狗 | IWDG，溢出周期约 2 s |
+| 看门狗 | IWDG，溢出周期 **≈ 6.4 s**（LSI ≈ 40 kHz ÷ 64 = 625 Hz，重装值 4000） |
 | JSON | cJSON 库（轻量 C 实现，仅编译所需模块） |
 
 ### 上位机（Qt）
@@ -202,9 +202,9 @@ greenhouse/
 | `relay_on` | 手动吸合继电器 | — | 切换到**手动模式** |
 | `relay_off` | 手动释放继电器 | — | 切换到**手动模式** |
 | `auto` | 切回自动模式 | — | 下一轮主循环按当前 `light` 重算输出 |
-| `set_th` | 设阈值 | `value`（0–4095，且 > `hys`） | 立即写 EEPROM 并回 ack |
+| `set_th` | 设阈值 | `value`（0–4095，且 > `hys`） | 写 EEPROM **成功才回 `ok`**；`EEPROM_Save` 失败则**回滚 `g_th`** 并回 `err`（`err` 语义 = **指令未生效**，不留半生效状态） |
 | `get_state` | 查询状态 | — | 回一条包含完整状态的 ack |
-| `alarm_test` | 报警测试 | — | 蜂鸣器脉冲 1 s，**不改模式、不动执行器**，到期恢复与执行器的联动。对应 PRD 的"报警测试"按钮 |
+| `alarm_test` | 报警测试 | — | 蜂鸣器脉冲 1 s，**不改模式、不动执行器**；到期恢复到**报警声占空比相位**（`relay` 已释放则静音）。对应 PRD 的"报警测试"按钮 |
 <!-- FACT:proto-downlink END -->
 
 > **`query` 不是合法动作名**，统一使用 `get_state`。三处（协议表 / System Prompt / `CommandEngine::validate`）必须一致。
@@ -296,8 +296,8 @@ greenhouse/
 <!-- FACT:fw-modules BEGIN -->
 | 模块 | 文件 | 职责 |
 | --- | --- | --- |
-| 光照采集 | `adc_light.c/h` | PF8 模拟输入初始化、ADC3 通道 6 采样、8 次均值、`light = 4095 - adc`、采样有效性标记 |
-| 控制逻辑 | `control.c/h` | 执行器抽象（宏配置）、回差状态机、自动/手动模式、执行器/蜂鸣器 GPIO 控制、报警测试脉冲 |
+| 光照采集 | `adc_light.c/h` | PF8 模拟输入初始化、ADC3 通道 6 采样、8 次均值、`light = 4095 - adc`、**采样有效性门控**（`Light_IsValid()` / `ADC_LIGHT_INVALID` 哨兵 / `s_last_good` 保持上次有效值） |
+| 控制逻辑 | `control.c/h` | 执行器抽象（宏配置）、回差状态机、自动/手动模式、执行器/蜂鸣器 GPIO 控制、**报警声"响 10 s / 停 10 s"占空比**、**采样无效时拒绝自动决策**、报警测试脉冲 |
 | 显示 | `lcd_show.c/h` | LCD 刷新光强值、阈值、继电器状态、模式 |
 | 通信 | `esp8266.c/h` | AT 指令收发、WiFi 连接、TCP 透传、接收行缓冲、`CLOSED` 嗅探、重连退避 |
 | 协议 | `protocol.c/h` | cJSON 组包 report/ack/evt，解包 cmd，环形缓冲行断帧 |
@@ -439,6 +439,35 @@ uint16_t Light_ReadRaw(uint8_t times)
 > **不要使用 `lsens_get_val()`**：它返回 0–100 的压缩值（分辨率仅 2.44%），与协议声明的 0–4095 不符。
 > **采样失败不能 `return 0`**：`0` 经 `LIGHT_FROM_ADC` 会变成 **4095 = 最强光**，等于把"传感器故障"翻译成"越限报警"。失败时保持上次有效值并置 `s_valid = 0`，由控制层跳过自动决策（宁可维持现状也不误动作）。
 
+### 采样有效性门控
+
+<a id="sot-sample-validity"></a>
+
+<!-- FACT:sample-validity BEGIN -->
+**动机（一个真实的故障模式）**：ADC 读失败曾用 `return 0` 表示，
+而 `LIGHT_FROM_ADC(0) = LIGHT_ADC_MAX - 0` = **4095 = 最强光**
+→ `control.c` 判定"光过强" → 吸合执行器 + 蜂鸣器响 + 上报 `evt: alarm`。
+**"读失败"与"最亮"共用同一个返回值，等于把"传感器故障"翻译成"光照过强报警"。**
+
+现行四层机制（生产者 `adc_light.c` + 消费者 `control.c`）：
+
+| 环节 | 实现 | 行为 |
+| --- | --- | --- |
+| 单次采样 | `static uint16_t adc3_get_result(void)`（`adc_light.c`） | `HAL_ADC_Start` / `HAL_ADC_PollForConversion` 失败时返回哨兵 **`ADC_LIGHT_INVALID = 0xFFFF`**（12 位量程 0–4095 内不可能出现），**不再 `return 0`** |
+| 8 次均值 | `uint16_t Light_ReadRaw(uint8_t times)` | 只对 `!= ADC_LIGHT_INVALID` 的**有效样本**求和求平均；**全部失败时保持上次有效值 `s_last_good`**，并置 `s_valid = 0` |
+| 有效性查询 | `uint8_t Light_IsValid(void)` | 返回 `s_valid`：**1 = 本次读数可信；0 = 采样失败**（传感器脱线 / ADC 异常），调用方**不应据此驱动执行器** |
+| 决策门控 | `void Control_Loop(uint16_t light)` | `!Light_IsValid()` 时**直接返回：不做任何自动决策、维持当前输出**（放在 `MODE_AUTO` 判断之后、`Control_AutoTarget()` 之前） |
+
+**取舍口径**：连续采样失败意味着当前光强**未知**，此时任何自动动作（尤其"光过强 → 吸合"）都无依据。
+宁可停在一个确定的安全状态，也不要用未知输入驱动执行器；本地闭环的其余功能（LCD、心跳、协议上报）不受影响。
+
+**配套降级**：`LightSensor_Init()` 的失败路径**不再调用 `Error_Handler()`** ——
+那是 `__disable_irq() + for(;;)`，而此时 IWDG 尚未启动（它在 `main()` 末尾），
+触发即**永久挂死且连复位都没有**；改为置 `s_valid = 0`、打印原因、继续跑本地其它功能。
+
+> 哨兵值与占空比常量另见附录 B；`Control_Loop` 的完整门控代码见上文"回差控制与手动优先状态机"。
+<!-- FACT:sample-validity END -->
+
 ### 回差控制与手动优先状态机
 
 ```c
@@ -449,18 +478,36 @@ static uint16_t g_hys = HYS_DEFAULT;     /*  150 */
 static uint8_t  g_mode = MODE_AUTO;
 static uint8_t  g_relay = 0, g_buzz = 0;
 
-/* 输出统一出口：任何路径改输出都走这里，避免继电器/蜂鸣器状态漂移 */
+/* 报警声占空比：响 10 s / 停 10 s 循环，与 relay **解耦**。
+ * 原实现 g_buzz = g_relay 使二者恒等，MODE_AUTO 下光过强会让蜂鸣器
+ * 连续长鸣数小时/整夜，且 relay_on 之后无法单独静音。 */
+#define ALARM_BEEP_ON_MS   10000U    /* 响 10 s */
+#define ALARM_BEEP_OFF_MS  10000U    /* 静默 10 s */
+static uint32_t s_beep_phase_end = 0U;   /* 当前相位结束时刻（0 = 无报警） */
+static uint8_t  s_beep_on        = 0U;   /* 当前相位：1 = 正在响 */
+
+/* 输出统一出口：任何路径改输出都走这里，避免继电器/蜂鸣器状态漂移。
+ * relay 表示执行器状态，buzz 由占空比相位驱动。 */
 static void Control_ApplyOutput(uint8_t on)
 {
     g_relay = on;
-    g_buzz  = on;                    /* 任务书要求二者联动，见 BUZZ_FOLLOW_RELAY */
     Actuator_Set(on);                /* 执行器：当前 LED1，目标继电器 PD11，业务代码不变 */
-    Buzzer_Set(on);
+
+    if (on != 0U) {                  /* 进入报警：蜂鸣器立刻响，并进入"响"相位 */
+        s_beep_on = 1U;  s_beep_phase_end = HAL_GetTick() + ALARM_BEEP_ON_MS;
+        g_buzz = 1U;     Buzzer_Set(1U);
+    } else {                         /* 退出报警：立刻静音并清相位 */
+        s_beep_on = 0U;  s_beep_phase_end = 0U;
+        g_buzz = 0U;     Buzzer_Set(0U);
+    }
 }
 
 void Control_Apply(uint16_t th, uint16_t hys, uint8_t mode)
 {
-    g_th = th; g_hys = hys; g_mode = mode;
+    /* 装载期也强制不变式，防止坏值把状态机带进死区 */
+    if (hys >= th || th > LIGHT_ADC_MAX) { th = TH_DEFAULT; hys = HYS_DEFAULT; }
+    g_th = th; g_hys = hys;
+    g_mode = (mode == MODE_MANUAL) ? MODE_MANUAL : MODE_AUTO;
 }
 
 /* 自动模式下的目标输出（回差在这里体现） */
@@ -473,15 +520,30 @@ static uint8_t Control_AutoTarget(uint16_t light)
 
 void Control_Loop(uint16_t light)
 {
-    /* 报警测试脉冲到期：恢复与执行器的联动状态（不改模式、不动执行器） */
+    /* 报警测试脉冲到期：恢复到**占空比相位**（不是直接 = g_relay，
+     * 否则会把当前"静默"相位破坏掉，变成常鸣）。 */
     if (s_buzz_pulse_end != 0U && (int32_t)(HAL_GetTick() - s_buzz_pulse_end) >= 0) {
         s_buzz_pulse_end = 0U;
-        g_buzz = g_relay;
-        Buzzer_Set(g_relay);
+        g_buzz = (g_relay != 0U) ? s_beep_on : 0U;
+        Buzzer_Set(g_buzz);
+    }
+
+    /* ★ 报警声占空比推进 ★ 放在模式判断**之前**，手动吸合时同样受保护 */
+    if (g_relay != 0U && s_beep_phase_end != 0U &&
+        (int32_t)(HAL_GetTick() - s_beep_phase_end) >= 0) {
+        s_beep_on        = (uint8_t)(s_beep_on == 0U ? 1U : 0U);
+        s_beep_phase_end = HAL_GetTick() +
+                           (s_beep_on != 0U ? ALARM_BEEP_ON_MS : ALARM_BEEP_OFF_MS);
+        g_buzz = s_beep_on;  Buzzer_Set(s_beep_on);
     }
 
     if (g_mode != MODE_AUTO)
         return;                                       /* 手动模式：自动逻辑完全不介入 */
+
+    /* ★ 采样无效时**不做任何自动决策**（维持当前输出）★
+     * 连续采样失败 = 当前光强未知，任何自动动作（尤其"光过强 → 吸合"）都无依据。 */
+    if (!Light_IsValid())
+        return;
 
     uint8_t target = Control_AutoTarget(light);
     if (target != g_relay) {
@@ -505,14 +567,20 @@ void Control_OnCommand(const char *action, int32_t value)
             Protocol_SendAck(action, "err");          /* 阈值必须大于回差，否则 th-hys 下溢 */
             return;
         }
+        /* ★ 如实回报落盘结果，并回滚 g_th，让 "err" 的语义唯一：指令未生效 ★ */
+        uint16_t old_th = g_th;
         g_th = (uint16_t)value;
-        EEPROM_Save(g_th, g_hys);                     /* ≤5 ms 写周期，写完再回 ack */
+        if (!EEPROM_Save(g_th, g_hys)) {              /* I2C 写失败 / 20 次 ACK 轮询全败 */
+            g_th = old_th;                            /* 回滚：不留半生效状态 */
+            Protocol_SendAck(action, "err");
+            return;
+        }
         Protocol_SendAck(action, "ok");
     } else if (!strcmp(action, "get_state")) {
         Protocol_SendAck(action, "ok");               /* ack 已携带完整状态 */
     } else if (!strcmp(action, "alarm_test")) {
         g_buzz = 1; Buzzer_Set(1);                    /* 蜂鸣器脉冲 1 s */
-        s_buzz_pulse_end = HAL_GetTick() + 1000U;     /* 到期由 Control_Loop 恢复联动 */
+        s_buzz_pulse_end = HAL_GetTick() + 1000U;     /* 到期由 Control_Loop 恢复占空比相位 */
         Protocol_SendAck(action, "ok");
     } else {
         Protocol_SendAck(action, "err");              /* 未知动作一律拒绝 */
@@ -523,6 +591,8 @@ void Control_OnCommand(const char *action, int32_t value)
 > **为什么必须有 `mode`**：[PRD.md](PRD.md) 要求"Qt 手动控制可随时覆盖自动状态"。若没有该标志，Qt 下发 `relay_off` 后，下一轮 `Control_Loop` 立即按 `light > th` 把继电器重新吸合，用户看到继电器"弹一下就回去"。
 > **不变式**：`0 <= hys < th <= 4095`。该不变式在 EEPROM 加载、`set_th` 校验两处强制，是防止 `g_th - g_hys` 下溢（unsigned 下溢后比较永假、继电器锁死）的唯一屏障。
 > **超时比较一律用回绕安全写法** `(int32_t)(HAL_GetTick() - deadline) >= 0`：tick 是 32 位毫秒计数，直接比大小的写法在溢出后失效（报警测试脉冲、报警声相位、AT 超时、重连退避都适用）。
+> **报警声与执行器解耦**：`relay` 表示执行器状态，`buzz` 由"响 10 s / 停 10 s"相位驱动（对齐参考工程 `app_config.h` 的 `APP_ALARM_TIME_MS` / `APP_ALARM_GAP_MS` 口径）。若写成 `g_buzz = g_relay`，MODE_AUTO 下光过强会让蜂鸣器**连续长鸣数小时/整夜**，且 `relay_on` 之后无法单独静音 —— 那已不是"报警"。
+> **`err` 的语义唯一**：`set_th` 的 `EEPROM_Save` 失败会**回滚 `g_th`** 再回 `err`，即"报错 ⇔ 指令未生效"。若保留内存新值却回 `err`，上位机面对的是"报错但状态其实变了"的二义；若丢弃返回值无条件回 `ok`，则是**谎报**（24C02 不在位在这类板子上很常见，重启后悄悄回到旧值）。
 
 ### 阈值存储
 
@@ -626,7 +696,8 @@ DISCONNECT ←──────────────────────
 
 ### 看门狗
 
-- IWDG 溢出周期约 2 s（LSI ≈ 40 kHz，预分频 64 → 625 Hz，重装值 1250 → 2.0 s）
+- IWDG 溢出周期 **≈ 6.4 s**（LSI ≈ 40 kHz，预分频 64 → 625 Hz，重装值 4000 → 4000 ÷ 625 = 6.4 s）
+- **超时余量是刻意留的**：`MX_IWDG_Init()` 紧邻 `for(;;)` 之前才调用，开机路径（含 `Led0_BlinkMark(2)` ≈ 1.1 s）不消耗超时余量；"开狗 → 主循环首次喂狗"约 1.2 s，对 6.4 s 有约 **5×** 余量
 - 主循环顶部喂狗；`Esp8266_Poll()` 的每个等待步进内也喂狗；EEPROM 页写入后的 ACK 轮询**每 5 轮喂一次狗**
 - 验收要求"连续运行 30 分钟无死机"，IWDG 是这条要求最直接的保障手段
 
@@ -914,7 +985,7 @@ bool CommandEngine::validate(const QJsonObject &cmd, QString *why)
 - ESP8266 断线自动重连，退避策略防风暴
 - 指令执行必须回 `ack`，Qt 收到 `ack` 才更新"已执行"状态
 - 阈值 EEPROM 存魔数 + 校验和 + 不变式校验，任一项失败即用默认值，不影响启动
-- IWDG ≈ 2 s，主循环与 AT 等待路径均喂狗
+- IWDG ≈ 6.4 s，主循环与 AT 等待路径均喂狗
 - Qt 启动时检测 llama-server，不可用时降级而非崩溃
 
 ### 安全性
@@ -989,7 +1060,7 @@ bool CommandEngine::validate(const QJsonObject &cmd, QString *why)
 | 里程碑 | 内容 | 验收判据 |
 | --- | --- | --- |
 | **M1 本地感知** | ADC3 通道 6 读 PF8、8 次均值、`light` 换算、LCD 显示 | 手电照射 `light` 上升、遮挡下降，方向正确 |
-| **M2 本地闭环** | 回差状态机 + 手动优先、执行器 + 蜂鸣器联动、AT24C02 掉电记忆、IWDG、LED0 心跳 | 阈值边界三点行为正确；断电重启阈值保留；上电执行器断开、蜂鸣器不响（**阶段一执行器为 LED1 等效负载**，见 A.5） |
+| **M2 本地闭环** | 回差状态机 + 手动优先、执行器 + 蜂鸣器报警（**响 10 s / 停 10 s 占空比**，与执行器解耦）、AT24C02 掉电记忆、IWDG、LED0 心跳 | 阈值边界三点行为正确；断电重启阈值保留；上电执行器断开、蜂鸣器不响（**阶段一执行器为 LED1 等效负载**，见 A.5） |
 | **M2b 执行器切换** | 借用继电器到位后：替换 `ACTUATOR_*` 四行宏、接 VCC/GND/IN 三线、按 T17 复测 | 真实继电器完成 T02/T03/T05，且状态机 / 协议 / 上位机**零改动** |
 | **M3 无线通信** | ESP8266 连 WiFi、TCP 透传、行缓冲收包、JSON report 上报 | Qt 收到数据；拔网线后本地闭环不受影响 |
 | **M4 Qt 控制** | NodeServer(9092)、ControlPanel 按钮、改阈值、切回自动、QChart 曲线 | 命令下发 → 执行 → ack 回读 → 界面更新；离线判定生效 |
@@ -1088,9 +1159,13 @@ VCC3.3 ──[ 固定电阻 ]──┬── PF8 (ADC3_IN6) ──→ STM32 ADC3
 <!-- FACT:threshold-behavior BEGIN -->
 | 条件 | 行为 |
 | --- | --- |
-| `light > th` | 继电器吸合 + 蜂鸣器响 + 上报 `evt: alarm` |
-| `light < th - hys` | 继电器释放 + 蜂鸣器停 + 上报 `evt: recover` |
+| `light > th` | 继电器吸合 + 蜂鸣器**开始报警** + 上报 `evt: alarm` |
+| `light < th - hys` | 继电器释放 + 蜂鸣器**立刻静音** + 上报 `evt: recover` |
 | `th - hys <= light <= th` | 死区，保持当前状态 |
+
+> **报警声不是常鸣**：报警期间蜂鸣器按"响 10 s / 停 10 s"占空比循环（`ALARM_BEEP_ON_MS` / `ALARM_BEEP_OFF_MS`），
+> `buzz` 字段随相位在 0/1 间变化；`relay` 与 `buzz` **解耦**（`relay` = 执行器状态，`buzz` = 报警提示相位）。
+> 实现见 §固件设计「回差控制与手动优先状态机」的 `Control_ApplyOutput()` / `Control_Loop()`。
 <!-- FACT:threshold-behavior END -->
 
 **不变式**：`0 <= hys < th <= 4095`，在 EEPROM 加载与 `set_th` 校验两处强制。
@@ -1294,10 +1369,12 @@ void Actuator_Set(uint8_t on)
 | 采集 / 上报周期 | 1 s | 设计 |
 | 默认阈值 / 回差 | `th = 2000`、`hys = 150`（light 单位） | 设计 |
 | 蜂鸣器 | PB8，高电平响 | 官方 `beep.c` |
+| 报警声占空比 | 响 **10 s** / 停 **10 s**（`ALARM_BEEP_ON_MS` / `ALARM_BEEP_OFF_MS`），与 `relay` 解耦 | `control.c`；口径同参考工程 `app_config.h:111-112`（`APP_ALARM_TIME_MS` / `APP_ALARM_GAP_MS` 均 10000） |
+| 采样失败哨兵 | `ADC_LIGHT_INVALID = 0xFFFF`（12 位量程内不可能出现） | `adc_light.c` |
 | 执行器 | 阶段一 **PE5（LED1 等效负载）** / 阶段二 **PD11（借用继电器，低电平触发）** | A.5 |
 | 运行心跳 | LED0（PB5），**每 5 s 翻转一次** | 设计 |
 | EEPROM | AT24C02 @ I2C1 PB6/PB7，8 字节（1 页），写周期 ≤ 5 ms | 芯片手册 |
-| IWDG 溢出 | **≈ 2.0 s**（40 kHz LSB ÷ 64 = 625 Hz，重装 1250） | 计算 |
+| IWDG 溢出 | **≈ 6.4 s**（LSI ≈ 40 kHz ÷ 64 = 625 Hz，重装值 **4000**） | `main.c` `MX_IWDG_Init()` |
 | Qt 监听 / 推理端口 | **9092** / **8092** | 设计 |
 | 静默失效判定 | 3 s（3 × 上报周期） | 设计 |
 | 曲线保留点数 | 300 | 设计 |

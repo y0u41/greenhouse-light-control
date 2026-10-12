@@ -11,7 +11,10 @@ fact_inventory.py —— 关键事实清点与「去重收敛」前后比对（P
     1. 清点（snapshot）—— 统计每份文档里各类技术事实的出现次数与去重后的
        token 集合，作为收敛决策与 before/after 的依据；
     2. 比对（compare）—— 断言**关键事实全集在收敛前后完全相等**：
-       合并后全集不变 ⇒ 没有任何事实因为"删副本"而从语料里消失；
+       合并后全集不变 ⇒ 没有任何事实因为"删副本"而从语料里消失。
+       两类受控例外（都必须在登记表里给出可复核证据，且每次运行都原样打印）：
+       RENAMES = 旧标识符被纠正为固件里的真实名字；REMOVED = 文档里的**伪事实**
+       （符号在固件中不存在 / 属笔误），删除即纠错，不是丢失。
     3. 审计（audit）—— 对**每一条被删除的行**逐条核对：它包含的事实 token 是否
        都能在 Tech_Design.md 里找到等价表述，输出可贴进报告的核对清单。
 
@@ -55,6 +58,18 @@ RENAMES: dict[str, str] = {
     "led_init": "Led0_Init",             # main.c：初始化用 Led0_Init()
     "beep_init": "Buzzer_Init",          # control.c：蜂鸣器初始化在 Control_Init 内
     "ESP8266_Init": "Esp8266_Init",      # esp8266.h：void Esp8266_Init(...)
+}
+
+# 已登记的「伪事实删除」：该符号/写法在**固件里根本不存在**（或纯属笔误），
+# 所以删除它是**纠错**，不是丢失事实。每一项都必须附可复核的证据。
+# 复核方法（可复现）：`git grep -n "<符号>" HEAD -- firmware/` 必须为空。
+REMOVED: dict[str, str] = {
+    # 只出现在 Tech_Design.md 旧代码清单的一句注释里（`见 BUZZ_FOLLOW_RELAY`）；
+    # firmware/ 全树从未定义过该宏。它想表达的"联动"行为已由报警声占空比常量
+    # ALARM_BEEP_ON_MS / ALARM_BEEP_OFF_MS（control.c）取代。
+    "BUZZ_FOLLOW_RELAY": "文档里的虚构标识符：`git grep BUZZ_FOLLOW_RELAY HEAD -- firmware/` 为空",
+    # STM32F1 的 IWDG 时钟源是 LSI（低速内部 RC）；main.c 注释亦写 LSI。"LSB" 是笔误。
+    "LSB": "笔误，应为 LSI（低速内部 RC，IWDG 的时钟源）",
 }
 
 # ---- token 抽取 ----------------------------------------------------------
@@ -230,6 +245,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
     skip = set(a.get("heading_numbers", [])) | set(b.get("heading_numbers", []))
     after_all = {t for c in CATEGORIES for t in union_tokens(b, c, docs)}
     renamed: list[str] = []
+    removed: list[str] = []
     for cat in CATEGORIES:
         ua, ub = union_tokens(a, cat, docs), union_tokens(b, cat, docs)
         if cat == "num":
@@ -242,11 +258,18 @@ def cmd_compare(args: argparse.Namespace) -> int:
             if new and new in after_all:
                 lost.discard(tok)
                 renamed.append("%s -> %s" % (tok, new))
+            elif tok in REMOVED:
+                # 已登记的伪事实删除：固件里不存在/属笔误 -> 记为"纠错"而不是"丢失"
+                lost.discard(tok)
+                removed.append("%s（%s）" % (tok, REMOVED[tok]))
         if not lost:
             note = ""
             if renamed:
                 note = "  （含已登记更名：%s）" % "；".join(renamed)
                 renamed = []          # 只提示一次
+            if removed:
+                note += "  （含已登记纠错删除：%s）" % "；".join(removed)
+                removed = []
             if added:
                 note += "  （新增 %d 个事实：%s）" % (len(added), ", ".join(sorted(added)))
             print("%-12s %8d %8d  OK 无丢失%s" % (cat, len(ua), len(ub), note))
@@ -261,13 +284,21 @@ def cmd_compare(args: argparse.Namespace) -> int:
 
     ua_all = set().union(*[union_tokens(a, c, docs) for c in CATEGORIES]) - skip
     ub_all = set().union(*[union_tokens(b, c, docs) for c in CATEGORIES]) - skip
-    lost_all = {t for t in (ua_all - ub_all) if t.split(":", 1)[-1] not in RENAMES}
+    lost_all = {t for t in (ua_all - ub_all)
+                if t.split(":", 1)[-1] not in RENAMES
+                and t.split(":", 1)[-1] not in REMOVED}
     print()
     print("全部类别合并：before %d 个事实 token / after %d 个 -> %s"
           % (len(ua_all), len(ub_all),
              "OK 全集不变（零丢失）" if not lost_all else "FAIL 全集发生变化"))
     if renamed:
         print("已登记更名（旧标识符纠正为固件实现名，非丢失）：%s" % "；".join(renamed))
+    if removed:
+        print("已登记纠错删除（文档里的伪符号/笔误，固件中不存在，非事实丢失）：%s"
+              % "；".join(removed))
+    print("纠错删除登记表（共 %d 项，每项均可复核）：" % len(REMOVED))
+    for k, why in REMOVED.items():
+        print("  - %-22s %s" % (k, why))
 
     print()
     print("=" * 78)
@@ -371,6 +402,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
                     where[t] = ["(章节编号)"]
                 elif t.split(":", 1)[-1] in RENAMES:
                     where[t] = ["(已登记更名 -> %s)" % RENAMES[t.split(":", 1)[-1]]]
+                elif t.split(":", 1)[-1] in REMOVED:
+                    where[t] = ["(已登记纠错删除：%s)" % REMOVED[t.split(":", 1)[-1]]]
                 else:
                     missing.append(t)
             rows.append({"doc": name, "line": i, "text": n,
@@ -507,7 +540,13 @@ class _Tee:
         self.f = open(path, "w", encoding="utf-8", newline="\n")
 
     def write(self, s: str) -> int:
-        sys.__stdout__.write(s)
+        # 控制台代码页（本机 936/GBK）装不下的字符（如审计输出里的 ⚠ U+26A0）
+        # 不应让整个工具崩掉：退化为该编码的替换字符，**文件里仍是完整 UTF-8**。
+        try:
+            sys.__stdout__.write(s)
+        except UnicodeEncodeError:
+            enc = getattr(sys.__stdout__, "encoding", None) or "utf-8"
+            sys.__stdout__.write(s.encode(enc, "replace").decode(enc, "replace"))
         self.f.write(s)
         return len(s)
 
