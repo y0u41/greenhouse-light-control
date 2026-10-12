@@ -190,6 +190,78 @@ static cJSON *parse_literal(parser *ps, const char *lit, int type)
 
 static cJSON *parse_value(parser *ps);          /* 前向声明 */
 
+/**
+ * @brief 解析 JSON 数组 [v1, v2, ...]
+ *
+ * ★ 为什么补这个函数（修复 P-1）★
+ * 本文件原先**没有数组解析**：parse_value() 只处理 '{'，遇到 '[' 直接落到
+ * "非法字符"分支置 ps->err，导致 cJSON_Parse 返回 NULL。
+ * 后果不是"数组被忽略"，而是**含数组的整帧解析失败** —— 而
+ * protocol.c:126-128 对解析失败是静默 return（连 err ack 都不发），
+ * 于是表现为"指令没反应、上位机 ack 超时"，且没有任何可观测错误。
+ *
+ * 这与协议声明的"忽略未知键以向前兼容"直接冲突：上位机只要新增**任何**
+ * 数组字段（批处理列表、历史点、多阈值…），该帧就整条失效。
+ * 由 tests/host/test_protocol.c 的逐键隔离用例定位（7 种未知键里唯独数组致命）。
+ *
+ * 实现与 parse_object 对称：数组元素同样挂在 child/next/prev 链上，
+ * 因此现有的 cJSON_Delete()（:351）无需改动即可递归释放数组元素。
+ */
+static cJSON *parse_array(parser *ps)
+{
+    /* 调用前须保证 *ps->p == '[' */
+    ps->p++;
+
+    cJSON *arr = new_node(cJSON_Array);
+    if (!arr) {
+        ps->err = 1;
+        return NULL;
+    }
+
+    skip_ws(ps);
+    if (ps->p < ps->end && *ps->p == ']') {     /* 空数组 [] */
+        ps->p++;
+        return arr;
+    }
+
+    cJSON *prev = NULL;
+    while (1) {
+        skip_ws(ps);
+        if (ps->p >= ps->end) {                 /* 未闭合 */
+            ps->err = 1;
+            break;
+        }
+        /* 与对象不同：数组元素**没有键名**，直接是 value。
+         * 嵌套数组/对象由 parse_value 递归处理。 */
+        cJSON *val = parse_value(ps);
+        if (!val) {
+            ps->err = 1;
+            break;
+        }
+
+        if (arr->child == NULL) {
+            arr->child = val;
+        } else {
+            prev->next = val;
+        }
+        val->prev = prev;
+        prev = val;
+
+        skip_ws(ps);
+        if (ps->p < ps->end && *ps->p == ',') {
+            ps->p++;
+            continue;
+        }
+        if (ps->p < ps->end && *ps->p == ']') {
+            ps->p++;
+            break;
+        }
+        ps->err = 1;
+        break;
+    }
+    return arr;
+}
+
 static cJSON *parse_object(parser *ps)
 {
     /* 调用前须保证 *ps->p == '{' */
@@ -276,6 +348,9 @@ static cJSON *parse_value(parser *ps)
     char c = *ps->p;
     if (c == '{') {
         return parse_object(ps);
+    }
+    if (c == '[') {                             /* 数组（P-1 修复前缺失，见 parse_array 注释） */
+        return parse_array(ps);
     }
     if (c == '"') {
         return parse_string(ps);
