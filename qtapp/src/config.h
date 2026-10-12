@@ -15,8 +15,9 @@ public:
     int     tcpPort() const;
     void    setTcpPort(int v);
     /* 监听地址：默认 0.0.0.0 —— 节点经局域网连入，必须监听 LAN 网卡。
-     * 注：Tech_Design 旧文写"绑定 127.0.0.1"，与"节点 CIPSTART 目标为 PC 局域网 IP"矛盾；
-     *     此处按功能优先取 LAN 绑定（不等于暴露公网），待用户确认后回改文档。 */
+     * 依据 Tech_Design §配置项（QSettings）`tcp/bindAddress`：文档已写明默认
+     * 0.0.0.0，并说明"Qt 若只绑 127.0.0.1 将永远连不上"；此处实现与文档一致，
+     * 无待回改项。需收紧时改为 PC 的 LAN IP，并同步防火墙放行 9092。 */
     QString bindAddress() const;
     void    setBindAddress(const QString &v);
 

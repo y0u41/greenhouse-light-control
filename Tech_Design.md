@@ -805,8 +805,8 @@ void LlmClient::ask(const QString &userText, const NodeState &st)
         {"temperature", 0.1},                         // 控制类任务需稳定输出
         {"max_tokens",  512},                         // 思考型模型需留足，太小会导致 content 为空
         {"stream",      false},                       // 一次性返回更易解析
-        // 关闭思考：llama.cpp 较新版本支持该字段；若本机版本不支持会报错，请删除此键，
-        // 改为在 System Prompt 中要求"直接给最终 JSON"，并把 max_tokens 调大后重新实测
+        // 关闭思考：本机 llama-server 已实测接受并生效（2026-10-12，build 11457）——
+        // 带 enable_thinking=false 时无 reasoning_content；不带该键时 reasoning 会占满 token 预算
         {"chat_template_kwargs", QJsonObject{{"enable_thinking", false}}},
         {"messages",    buildMessages(userText, st)}
     };
@@ -1050,6 +1050,8 @@ bool CommandEngine::validate(const QJsonObject &cmd, QString *why)
 | Qt Creator | 20.0.2 Enterprise | — |
 | 固件工具 | Keil MDK 或 CLion + arm-none-eabi-gcc | — |
 | 推理引擎 | llama.cpp Server，`127.0.0.1:8092`，router 模式 | ✅ 已核验启动脚本 |
+| 推理引擎版本 | **0.6.0-dev（build 11457，commit 5ad1c5da0）**，`llama-server.exe --version` | ✅ 已核验 |
+| `chat_template_kwargs` / `enable_thinking` | **本机版本已实测支持并生效**：`enable_thinking=false` → HTTP 200、无 `reasoning_content`、`completion_tokens` 23；`=true` → HTTP 200、512 token 被 reasoning 吃满而 `content` 为空；不带该键 → HTTP 200、434 token 的 `reasoning_content`。实测 2026-10-12，build 11457，JSON 走 `/v1/chat/completions` | ✅ 已实测（**注意**：该 server 对 `chat_template_kwargs` 内的未知键**不报错**——塞入伪造键仍是 HTTP 200，故"未报错"不能作为键生效的证据，必须比对 `reasoning_content` / token 数） |
 | Python | **`python` 命令不可用（Store 占位 stub）；用 `py`（3.14.7）** | ✅ 已核验 |
 | GPU | NVIDIA RTX 4060 Laptop 8GB | — |
 | 中文 TTS 语音 | SAPI5 仅 `Microsoft Huihui Desktop`；OneCore 另有 `Microsoft Huihui` / `Microsoft Kangkang` / `Microsoft Yaoyao` | ✅ 已核验（**无 `Microsoft Xiaoxiao`**，不要写成默认值） |
@@ -1098,7 +1100,7 @@ bool CommandEngine::validate(const QJsonObject &cmd, QString *why)
 | 3 | ESP8266 是否已刷 AT 固件、供电方案（独立 3.3 V/1 A 还是板载 AMS1117 + 电容） | ⚠️ ESP8266 峰值电流约 300 mA，板载 LDO 常不够，会反复重启 |
 | 4 | 借用继电器的触发电平（高/低）与型号 | ⚠️ **建议选低电平触发**（3.3 V 灌电流可靠；LED1 也是低电平有效，切换时 `ACTUATOR_ACTIVE_LEVEL` 无需改动）。借用件到手后实测确认并填入 A.5 |
 | 5 | PC 的局域网 IP 与防火墙设置 | ⚠️ 节点 `CIPSTART` 目标，建议固定 IP + 放行 9092 |
-| 6 | llama.cpp 版本是否支持 `chat_template_kwargs` | ⚠️ 决定关闭思考的写法；不支持则改用 Prompt 约束 + 放大 `max_tokens` |
+| 6 | ~~llama.cpp 版本是否支持 `chat_template_kwargs`~~ | ✅ **已实测关闭（2026-10-12）**：llama-server 0.6.0-dev build 11457 接受该键且生效（带 `enable_thinking=false` 无 `reasoning_content`），**保留该键**；无需改用 Prompt 约束方案。证据与版本见 [附录 B 环境表](#sot-env) `enable_thinking` 行 |
 | 7 | 光敏 ADC 与实际光照（lux）的对应关系 | 可选加分：标准照度计两点标定后线性拟合 |
 | 8 | 大模型端到端延迟实测值 | ⚠️ 报告需要，M5 阶段补 |
 | 9 | **设计报告模板** | ⚠️ 项目目录中未找到，需向指导老师索取 |

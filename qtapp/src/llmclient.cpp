@@ -70,8 +70,14 @@ void LlmClient::ask(const QString &userText, const QString &stateJson)
     body.insert(QStringLiteral("max_tokens"), 512);       // 太小会导致 content 为空
     body.insert(QStringLiteral("stream"), false);
 
-    // 关闭思考（llama.cpp 较新版本支持）；若本机版本不支持该键会报错，
-    // 届时删除此键，改为在提示词中要求"直接给最终 JSON"并调大 max_tokens。
+    // 关闭思考：本机 llama-server 已实测接受该键（非假设）。
+    //   实测 2026-10-12，llama-server 0.6.0-dev build 11457 (5ad1c5da0)，
+    //   同一 prompt 对照：enable_thinking=false → HTTP 200、无 reasoning_content、
+    //   completion_tokens 23、content 直接给出 JSON；不带该键 → HTTP 200、434 token 的
+    //   reasoning_content。true/false 均 HTTP 200，故键被接受且实际生效。
+    // 注意：该 server 对 chat_template_kwargs 里的未知键不报错（实测塞入伪造键仍 200），
+    //   所以"没报错"本身不能证明键生效 —— 上面对 reasoning_content 的差异才是判据。
+    //   若将来换用更老的 llama.cpp 版本，请按同样方法重测，不要凭版本号推断。
     QJsonObject ctkw;
     ctkw.insert(QStringLiteral("enable_thinking"), false);
     body.insert(QStringLiteral("chat_template_kwargs"), ctkw);
@@ -151,8 +157,10 @@ QString LlmClient::extractContent(const QByteArray &raw, bool *ok)
     const QJsonObject msg = choices.first().toObject()
                                 .value(QStringLiteral("message")).toObject();
 
-    // 正常路径：content。思考型模型关闭思考失败时 content 可能为空，
-    // 此时退回 reasoning_content 尽力解析，交给 CommandEngine 校验兜底。
+    // 正常路径：content。但 content 可能为空、内容全在 reasoning_content ——
+    // 实测 2026-10-12：enable_thinking=true 时，512 token 的 max_tokens 被
+    // reasoning 吃满而 content 为空字符串。故此处退回 reasoning_content 尽力解析，
+    // 交给 CommandEngine 校验兜底（解析不出合法动作时按"未识别"处理）。
     QString content = msg.value(QStringLiteral("content")).toString();
     if (content.isEmpty()) {
         content = msg.value(QStringLiteral("reasoning_content")).toString();
