@@ -2,14 +2,12 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
-#include <QThread>
 #include <QNetworkAccessManager>
 #include <QComboBox>
 #include <QLabel>
 #include <QTextEdit>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QTimer>
 
 #include "config.h"
 #include "nodemodel.h"
@@ -17,7 +15,7 @@
 #include "commandengine.h"
 #include "command_ack_guard.h"
 #include "csvlogger.h"
-#include "llmclient.h"
+#include "llmcontroller.h"
 #include "chartwidget.h"
 #include "controlpanel.h"
 #include "ttsservice.h"
@@ -29,11 +27,6 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
-
-signals:
-    /* 发给工作线程里的 LlmClient（跨线程自动排队） */
-    void requestLlm(const QString &userText, const QString &stateJson);
-    void requestModels();
 
 private slots:
     void onNodeDataChanged(int id);
@@ -59,24 +52,22 @@ private slots:
     void onLlmFinished(const QString &content);
     void onLlmFailed(const QString &reason);
     void onModelsReady(const QStringList &models);
+    void onLlmAvailabilityChanged(bool ok);
     void onAsrText(const QString &text);
     void onAsrFailed(const QString &reason);
     void onAsrListeningChanged(bool listening);
 
-    void probeLlm();
     void refreshNodeCombo();
     void refreshDataPanel();
 
 private:
     void setupUi();
     void wireSignals();
-    void startLlmThread();
     void appendChat(const QString &who, const QString &text);
     QString stateJsonFor(int nodeId) const;
     void dispatchUserText(const QString &text);
     void speakState(int nodeId);
     int  currentHys() const;
-    void setLlmAvailable(bool ok);
 
     Config &m_cfg;
     NodeModel *m_model;
@@ -88,9 +79,7 @@ private:
     ControlPanel *m_panel;
     TtsService *m_tts;
     AsrService *m_asr;
-
-    QThread *m_llmThread = nullptr;
-    LlmClient *m_llm = nullptr;
+    LlmController *m_llmCtl;
 
     QComboBox *m_nodeCombo = nullptr;
     QLabel *m_lblLight = nullptr;
@@ -106,15 +95,12 @@ private:
     QPushButton *m_sendBtn = nullptr;
     QPushButton *m_speakBtn = nullptr;
     QPushButton *m_ttsBtn = nullptr;
-    QNetworkAccessManager *m_probeNam = nullptr;
-    QTimer m_llmProbe;
 
     int m_currentNode = 1;
-    QStringList m_models;
     /* 大模型可用性：智能交互的唯一判据。
      * 注意不要用 m_ttsBtn->isEnabled() 代替 —— TTS 未装时按钮禁用，
-     * 会把大模型指令链路一起拦死（本机 TextToSpeech 未安装，必现）。 */
-    bool m_llmAvailable = false;
+     * 会把大模型指令链路一起拦死（本机 TextToSpeech 未安装，必现）。
+     * 状态本身由 LlmController 持有（m_llmCtl->isAvailable()），此处不再另存一份。 */
 };
 
 #endif // MAINWINDOW_H

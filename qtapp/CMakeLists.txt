@@ -44,6 +44,7 @@ set(PROJECT_SOURCES
     src/command_ack_guard.cpp
     src/csvlogger.cpp
     src/llmclient.cpp
+    src/llmcontroller.cpp
     src/chartwidget.cpp
     src/controlpanel.cpp
     src/ttsservice.cpp
@@ -59,6 +60,7 @@ set(PROJECT_HEADERS
     src/command_ack_guard.h
     src/csvlogger.h
     src/llmclient.h
+    src/llmcontroller.h
     src/chartwidget.h
     src/controlpanel.h
     src/ttsservice.h

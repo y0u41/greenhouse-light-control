@@ -5,12 +5,9 @@
 #include <QHBoxLayout>
 #include <QGridLayout>
 #include <QGroupBox>
-#include <QNetworkReply>
-#include <QNetworkRequest>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
-#include <QUrl>
 #include <QDateTime>
 #include <QStatusBar>
 
@@ -26,7 +23,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_panel(new ControlPanel(this))
     , m_tts(new TtsService(this))
     , m_asr(new AsrService(this))
-    , m_probeNam(new QNetworkAccessManager(this))
+    , m_llmCtl(new LlmController(m_cfg, this))
 {
     setupUi();
     wireSignals();
@@ -53,24 +50,10 @@ MainWindow::MainWindow(QWidget *parent)
     if (!m_asr->available()) {
         appendChat(tr("系统"), tr("语音识别不可用（缺少 powershell/麦克风），可用文字输入"));
     }
-
-    startLlmThread();
-
-    m_llmProbe.setInterval(5000);
-    connect(&m_llmProbe, &QTimer::timeout, this, &MainWindow::probeLlm);
-    m_llmProbe.start();
-    probeLlm();
 }
 
 MainWindow::~MainWindow()
 {
-    if (m_llmThread != nullptr) {
-        m_llmThread->quit();
-        if (!m_llmThread->wait(3000)) {
-            m_llmThread->terminate();
-            m_llmThread->wait(1000);
-        }
-    }
 }
 
 void MainWindow::setupUi()
@@ -190,25 +173,13 @@ void MainWindow::wireSignals()
     connect(m_asr, &AsrService::textRecognized, this, &MainWindow::onAsrText);
     connect(m_asr, &AsrService::failed, this, &MainWindow::onAsrFailed);
     connect(m_asr, &AsrService::listeningChanged, this, &MainWindow::onAsrListeningChanged);
-}
 
-void MainWindow::startLlmThread()
-{
-    m_llmThread = new QThread(this);
-    connect(m_llmThread, &QThread::started, this, [this]() {
-        /* 在工作线程内构造：QNetworkAccessManager 与 LlmClient 同生共死 */
-        m_llm = new LlmClient();
-        m_llm->configure(m_cfg.llmUrl(), m_cfg.llmModel(),
-                         m_cfg.llmToken(), m_cfg.llmTimeoutMs());
-        connect(this, &MainWindow::requestLlm, m_llm, &LlmClient::ask);
-        connect(this, &MainWindow::requestModels, m_llm, &LlmClient::fetchModels);
-        connect(m_llm, &LlmClient::finished, this, &MainWindow::onLlmFinished);
-        connect(m_llm, &LlmClient::failed, this, &MainWindow::onLlmFailed);
-        connect(m_llm, &LlmClient::modelsReady, this, &MainWindow::onModelsReady);
-        connect(m_llmThread, &QThread::finished, m_llm, &QObject::deleteLater);
-        emit requestModels();
-    });
-    m_llmThread->start();
+    /* 大模型链路：控制器负责线程 / 探测 / 模型列表，UI 只接收结果与可用性 */
+    connect(m_llmCtl, &LlmController::llmFinished, this, &MainWindow::onLlmFinished);
+    connect(m_llmCtl, &LlmController::llmFailed, this, &MainWindow::onLlmFailed);
+    connect(m_llmCtl, &LlmController::modelsChanged, this, &MainWindow::onModelsReady);
+    connect(m_llmCtl, &LlmController::llmAvailabilityChanged,
+            this, &MainWindow::onLlmAvailabilityChanged);
 }
 
 /* ===================== 节点数据 ===================== */
@@ -416,17 +387,16 @@ void MainWindow::onSendText()
 
 void MainWindow::dispatchUserText(const QString &text)
 {
-    if (!m_llmAvailable) {
+    if (!m_llmCtl->isAvailable()) {
         /* 大模型不可用：给出明确提示，但监控与控制链路不受影响 */
         appendChat(tr("系统"), tr("大模型当前不可用，请用按钮控制或先启动 llama-server"));
         return;
     }
-    emit requestLlm(text, stateJsonFor(m_currentNode));
+    m_llmCtl->ask(text, stateJsonFor(m_currentNode));
 }
 
-void MainWindow::setLlmAvailable(bool ok)
+void MainWindow::onLlmAvailabilityChanged(bool ok)
 {
-    m_llmAvailable = ok;
     m_lblLlmStatus->setText(ok ? tr("大模型：可用") : tr("大模型：不可用"));
     /* 文字/语音输入只服务于大模型链路，不可用时置灰（PRD：智能交互降级，监控与控制照常） */
     m_inputEdit->setEnabled(ok);
@@ -470,30 +440,17 @@ void MainWindow::onLlmFinished(const QString &content)
 void MainWindow::onLlmFailed(const QString &reason)
 {
     appendChat(tr("系统"), reason);
-    /* 具体原因只进对话区；状态栏由 setLlmAvailable 统一维护，避免被周期探测覆盖后语义不一致 */
-    setLlmAvailable(false);
+    /* 具体原因只进对话区；状态栏由 onLlmAvailabilityChanged 统一维护，
+     * 避免被周期探测覆盖后语义不一致 */
+    m_llmCtl->setUnavailable();
 }
 
 void MainWindow::onModelsReady(const QStringList &models)
 {
-    m_models = models;
-    const QString configured = m_cfg.llmModel();
     if (models.isEmpty()) {
         appendChat(tr("系统"), tr("未获取到模型列表，请确认 llama-server 已启动"));
-        return;
     }
-    if (!models.contains(configured)) {
-        appendChat(tr("系统"),
-                   tr("配置的模型 %1 不在服务端列表中，已切换为 %2")
-                       .arg(configured, models.first()));
-        m_cfg.setLlmModel(models.first());
-        if (m_llm != nullptr) {
-            QMetaObject::invokeMethod(m_llm, [this]() {
-                m_llm->configure(m_cfg.llmUrl(), m_cfg.llmModel(),
-                                 m_cfg.llmToken(), m_cfg.llmTimeoutMs());
-            }, Qt::QueuedConnection);
-        }
-    }
+    /* "配置的模型不在服务端列表中 → 切换并重新 configure" 已由 LlmController 处理 */
 }
 
 void MainWindow::onSpeakClicked()
@@ -530,20 +487,6 @@ void MainWindow::onTtsToggled(bool on)
 }
 
 /* ===================== 其他 ===================== */
-
-void MainWindow::probeLlm()
-{
-    QUrl u(m_cfg.llmUrl());
-    u.setPath(QStringLiteral("/health"));
-
-    QNetworkRequest req(u);
-    req.setTransferTimeout(4000);
-    QNetworkReply *rep = m_probeNam->get(req);
-    connect(rep, &QNetworkReply::finished, this, [this, rep]() {
-        rep->deleteLater();
-        setLlmAvailable(rep->error() == QNetworkReply::NoError);
-    });
-}
 
 void MainWindow::appendChat(const QString &who, const QString &text)
 {
