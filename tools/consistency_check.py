@@ -6,8 +6,8 @@ consistency_check.py —— 跨层一致性守护（固件 ↔ Qt ↔ 契约 ↔
 与 contract_test.py 的分工
     contract_test.py 只管"动作词汇"这一件事（get_state / query 类漂移）。
     本脚本管**同一个事实在多处出现时是否一致**：阈值默认值、端口、引脚、
-    执行器阶段配置、亮度方向、文档集版本……这类漂移不会报编译错，只会让
-    文档与代码悄悄对不上，正是本项目 V1.0 阶段花力气消除的问题。
+    执行器阶段配置、亮度方向、看门狗超时、文档集版本……这类漂移不会报编译错，
+    只会让文档与代码悄悄对不上，正是本项目 V1.0 阶段花力气消除的问题。
 
 用法
     py tools/consistency_check.py          # 全部检查，任一失败则退出码 1
@@ -25,6 +25,19 @@ ROOT = Path(__file__).resolve().parent.parent
 FW = ROOT / "firmware" / "Core"
 QT = ROOT / "qtapp" / "src"
 DOCS = ["PRD.md", "Tech_Design.md", "项目规划书.md", "AGENTS.md", "设计报告.md"]
+
+# IWDG 数值守卫：LSI 标称频率，以及"规范性声明"看门狗超时的文档清单。
+LSI_HZ = 40000
+# AGENTS.md 与 docs/lessons.md 刻意保留了踩坑当时的旧值（≈2.0 s、RLR=1250）作为
+# 历史证据，**不能**参与比对，因此不列入。
+# 已知例外：firmware/CUBEMX_SETUP.md 里还有一处过时的 "IWDG ≈2 s"，它位于
+# firmware/ 目录、不在本守卫范围（改动 firmware/ 会与"最终提交不得含固件改动"冲突），
+# 需要单独跟进。
+IWDG_DOCS = ["Tech_Design.md", "设计报告.md", "项目规划书.md", "PRD.md"]
+# 文档里"声明看门狗超时"的写法（详见 iwdg_claims 的说明）
+IWDG_PERIOD_LINE = re.compile(r"≈\s*(\d+(?:\.\d+)?)\s*s\b")
+IWDG_ADJACENT = re.compile(r"IWDG\s*\**\s*≈")
+IWDG_RELOAD = re.compile(r"重装值\s*\**\s*(\d+)")
 
 VERBOSE = False
 FAILED: list[str] = []
@@ -44,6 +57,56 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 def macro(text: str, name: str, default: str = "") -> str:
     m = re.search(r"#define\s+%s\s+([0-9]+)U?" % re.escape(name), text)
     return m.group(1) if m else default
+
+
+def parse_iwdg(text: str):
+    """从 main.c 解析 IWDG 配置 -> (分频系数, 重装值, 超时秒数)；解析失败返回 None。
+
+    分频系数不取 `IWDG_PRESCALER_<N>` 的字面 N，而是按 RM0008 的合法档位
+    `N = 4 × 2^n` 反解 n 再算回 `4 × 2^n`，这样 `IWDG_PRESCALER_50` 之类
+    非法档位会被判为解析失败，而不是被当成 50 继续算。
+    """
+    m = re.search(r"\.Prescaler\s*=\s*IWDG_PRESCALER_(\d+)", text)
+    if not m:
+        return None
+    n_val = int(m.group(1))
+    if n_val < 4 or n_val % 4:                 # 必须是 4 的倍数
+        return None
+    n = (n_val // 4).bit_length() - 1          # n_val/4 必须是 2 的幂
+    if n > 6 or (4 << n) != n_val:
+        return None
+    divider = 4 << n
+
+    m = re.search(r"\.Reload\s*=\s*(\d+)\s*U?", text)
+    if not m:
+        return None
+    reload_val = int(m.group(1))
+    if not 0 < reload_val <= 4095:             # IWDG_RLR 只有 12 位
+        return None
+    return divider, reload_val, reload_val * divider / LSI_HZ
+
+
+def iwdg_claims(text: str) -> tuple[list[float], list[int]]:
+    """逐行收集文档声明的 (溢出秒数列表, 重装值列表)。
+
+    这是本守卫唯一的"读文档"入口，**绝不裸搜数字**。文档里"≈ x s"的写法太常见
+    （开机闪灯 `Led0_BlinkMark(2)` ≈ 1.1 s 就写在看门狗那段紧邻的一行里），
+    所以周期必须锚在"看门狗语境"上，只认下面两种声明式写法：
+
+      ① 同一行出现 `溢出` 且带 `≈ x s` —— 如 `IWDG 溢出周期 **≈ 6.4 s**`、
+         `| IWDG 溢出 | **≈ 6.4 s** |`；
+      ② `IWDG` 后紧跟 `≈ x s` —— 如 `IWDG ≈6.4 s`、`IWDG **≈ 6.4 s**`。
+
+    `重装值` 是本项目只用于 IWDG 的专有词，命中即可，不再要求同行语境。
+    """
+    periods: list[float] = []
+    reloads: list[int] = []
+    for line in text.splitlines():
+        if "溢出" in line or IWDG_ADJACENT.search(line):
+            periods += [float(m.group(1))
+                        for m in IWDG_PERIOD_LINE.finditer(line)]
+        reloads += [int(m.group(1)) for m in IWDG_RELOAD.finditer(line)]
+    return periods, reloads
 
 
 def main() -> None:
@@ -133,6 +196,50 @@ def main() -> None:
         m = re.search(r"[Vv](\d+\.\d+)", t)
         vers[n] = m.group(1) if m else "?"
     check("文档集 + 设计报告 版本号一致", len(set(vers.values())) == 1, str(vers))
+
+    print("\n== 8. 看门狗（IWDG）超时：main.c 解析值 == 文档声明 ==")
+    # 这个数字（超时秒数 / 重装值）曾长期潜伏在文档里没人发现，原因就是
+    # 没有任何机器看着它。此处**不硬编码**任何数值：一律从 main.c 现场解析，
+    # 文档只与解析结果比对；解析不出来就报 FAIL，绝不静默跳过。
+    main_c = read(FW / "Src" / "main.c")
+    parsed = parse_iwdg(main_c)
+    if parsed is None:
+        check("IWDG 超时与重装值：main.c 解析值 == 文档声明", False,
+              "无法从 main.c 解析 IWDG 配置。期望 MX_IWDG_Init() 里有 "
+              "`...Init.Prescaler = IWDG_PRESCALER_<4×2^n>`（合法档位 4~256）与 "
+              "`...Init.Reload = <1~4095>U`（RLR 仅 12 位）。"
+              "代码结构可能已变，请人工核对后同步本守卫")
+    else:
+        divider, reload_val, timeout = parsed
+        problems: list[str] = []
+        n_period = n_reload = 0
+        for name in IWDG_DOCS:
+            periods, reloads = iwdg_claims(docs[name])
+            n_period += len(periods)
+            n_reload += len(reloads)
+            if not periods:
+                problems.append("%s 未声明溢出周期（≈x s）" % name)
+            for p in periods:
+                if abs(p - timeout) > 0.05:
+                    problems.append("%s 声明 ≈%gs，main.c 算出 %gs"
+                                    % (name, p, timeout))
+            if not reloads:
+                problems.append("%s 未声明重装值" % name)
+            for r in reloads:
+                if r != reload_val:
+                    problems.append("%s 声明重装值 %d，main.c 为 %d"
+                                    % (name, r, reload_val))
+        # 同一处声明在文档里常出现多次（Tech_Design 就有 4 处），去重后
+        # 报错信息才不会退化成一长串重复
+        problems = list(dict.fromkeys(problems))
+        # 通过时也把"到底比对了多少处"打出来：否则无从判断这条守卫是不是
+        # "什么都没读到所以永远绿"
+        check("IWDG 超时与重装值：main.c 解析值 == 文档声明", not problems,
+              "；".join(problems) if problems else
+              "main.c: %d 分频 × 重装 %d / LSI %d Hz = %gs；%d 份文档共 %d 处"
+              "周期声明 + %d 处重装值声明，全部一致"
+              % (divider, reload_val, LSI_HZ, timeout,
+                 len(IWDG_DOCS), n_period, n_reload))
 
     print()
     if FAILED:

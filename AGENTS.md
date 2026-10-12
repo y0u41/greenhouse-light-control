@@ -277,7 +277,7 @@
   - 固件：`UV4.exe -b firmware\Projects\MDK-ARM\greenhouse.uvprojx -j0 -o build.log`
   - 上位机：`cmake -S <ascii>\qtapp -B <ascii>\qtapp\build -G Ninja -DCMAKE_PREFIX_PATH=E:/Qt/6.12.0/mingw_64`
 - `py tools/make_keil_project.py`：由官方模板生成 Keil 工程（**增删源文件后必跑**）；`--check` 只校验引用
-- **`py tools/consistency_check.py`：跨层一致性守护** —— 管"同一事实在多处出现是否一致"：动作词汇（契约/固件/Qt 三处）、TH/HYS 默认值、端口与监听地址、执行器两阶段配置、PF8/ADC3 引脚与 `light=4095-adc` 方向、文档集版本。**改任一处后必跑**，漂移即退出码 1
+- **`py tools/consistency_check.py`：跨层一致性守护** —— 管"同一事实在多处出现是否一致"：动作词汇（契约/固件/Qt 三处）、TH/HYS 默认值、端口与监听地址、执行器两阶段配置、PF8/ADC3 引脚与 `light=4095-adc` 方向、**IWDG 溢出周期与重装值（由 `main.c` 现场解析，不硬编码）**、文档集版本。**改任一处后必跑**，漂移即退出码 1
 - `py tools/bump_version.py 1.1 "说明"`：4 份文档版本号 + 修订记录一次同步（幂等；改完记得重跑 `md2docx.py`）
 - `py tools/simulate_node.py --id 2`：模拟节点 2，连 Qt 演示多点位（默认 127.0.0.1:9092）
 - `py tools/simulate_node.py --selftest`：离线冒烟，校验协议状态机，**不连网、可在 CI 跑**
