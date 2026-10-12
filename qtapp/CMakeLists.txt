@@ -49,6 +49,7 @@ set(PROJECT_SOURCES
     src/controlpanel.cpp
     src/ttsservice.cpp
     src/asrservice.cpp
+    src/voicecontroller.cpp
 )
 
 set(PROJECT_HEADERS
@@ -65,6 +66,7 @@ set(PROJECT_HEADERS
     src/controlpanel.h
     src/ttsservice.h
     src/asrservice.h
+    src/voicecontroller.h
     src/protocol_actions.h
 )
 

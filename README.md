@@ -72,9 +72,12 @@ firmware/                     STM32 固件（HAL）
 └─ prebuild_check.py          编译前静态自检（缺文件 / 双初始化 / 引脚主权）
 qtapp/                        Qt 6 上位机
 ├─ CMakeLists.txt
-└─ src/                       MainWindow / NodeServer / NodeModel / CommandEngine / CommandAckGuard /
-                              CsvLogger（历史数据落盘）/ LlmClient / ChartWidget / ControlPanel /
-                              TtsService / AsrService / Config
+└─ src/                       MainWindow（纯 UI 装配 / 信号转发）/ NodeServer / NodeModel /
+                              CommandEngine / CommandAckGuard /
+                              CsvLogger（历史数据落盘）/ LlmClient / LlmController（LLM 线程 +
+                              /health 探测 + 可用性）/ ChartWidget / ControlPanel /
+                              TtsService / AsrService / VoiceController（TTS 播报 + ASR 识别 +
+                              播报开关）/ Config
                               protocol_actions.h（协议词汇 C++ 侧单一事实源）
 tools/
 ├─ protocol_schema.py         协议契约单一事实源（动作词汇 + 字段校验）

@@ -18,8 +18,7 @@
 #include "llmcontroller.h"
 #include "chartwidget.h"
 #include "controlpanel.h"
-#include "ttsservice.h"
-#include "asrservice.h"
+#include "voicecontroller.h"
 
 class MainWindow : public QMainWindow
 {
@@ -46,7 +45,6 @@ private slots:
     void onGetState();
 
     void onSendText();
-    void onSpeakClicked();
     void onTtsToggled(bool on);
 
     void onLlmFinished(const QString &content);
@@ -77,9 +75,8 @@ private:
     CommandEngine *m_engine;
     ChartWidget *m_chart;
     ControlPanel *m_panel;
-    TtsService *m_tts;
-    AsrService *m_asr;
     LlmController *m_llmCtl;
+    VoiceController *m_voice;
 
     QComboBox *m_nodeCombo = nullptr;
     QLabel *m_lblLight = nullptr;

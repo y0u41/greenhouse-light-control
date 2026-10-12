@@ -21,9 +21,8 @@ MainWindow::MainWindow(QWidget *parent)
     , m_engine(new CommandEngine(m_server, m_model, this))
     , m_chart(new ChartWidget(this))
     , m_panel(new ControlPanel(this))
-    , m_tts(new TtsService(this))
-    , m_asr(new AsrService(this))
     , m_llmCtl(new LlmController(m_cfg, this))
+    , m_voice(new VoiceController(m_cfg, this))
 {
     setupUi();
     wireSignals();
@@ -44,12 +43,8 @@ MainWindow::MainWindow(QWidget *parent)
         m_lblServerStatus->setText(tr("服务器：监听 %1").arg(m_cfg.tcpPort()));
     }
 
-    m_tts->configure(m_cfg.ttsEnabled(), m_cfg.ttsVoice());
-    m_ttsBtn->setEnabled(m_tts->available());
-    m_speakBtn->setEnabled(m_asr->available());
-    if (!m_asr->available()) {
-        appendChat(tr("系统"), tr("语音识别不可用（缺少 powershell/麦克风），可用文字输入"));
-    }
+    m_voice->configureTts();
+    m_voice->configureAsr();
 }
 
 MainWindow::~MainWindow()
@@ -167,12 +162,21 @@ void MainWindow::wireSignals()
     /* 文字 / 语音 / 播报 */
     connect(m_sendBtn, &QPushButton::clicked, this, &MainWindow::onSendText);
     connect(m_inputEdit, &QLineEdit::returnPressed, this, &MainWindow::onSendText);
-    connect(m_speakBtn, &QPushButton::clicked, this, &MainWindow::onSpeakClicked);
-    connect(m_ttsBtn, &QPushButton::toggled, this, &MainWindow::onTtsToggled);
 
-    connect(m_asr, &AsrService::textRecognized, this, &MainWindow::onAsrText);
-    connect(m_asr, &AsrService::failed, this, &MainWindow::onAsrFailed);
-    connect(m_asr, &AsrService::listeningChanged, this, &MainWindow::onAsrListeningChanged);
+    /* 语音链路：控制器直接接按钮与 ASR 回调，UI 只消费结果信号 */
+    connect(m_speakBtn, &QPushButton::clicked,
+            m_voice, &VoiceController::toggleListening);
+    connect(m_ttsBtn, &QPushButton::toggled, this, &MainWindow::onTtsToggled);
+    connect(m_voice, &VoiceController::ttsAvailabilityChanged,
+            m_ttsBtn, &QPushButton::setEnabled);
+
+    connect(m_voice, &VoiceController::asrText, this, &MainWindow::onAsrText);
+    connect(m_voice, &VoiceController::asrFailed, this, &MainWindow::onAsrFailed);
+    connect(m_voice, &VoiceController::asrListeningChanged,
+            this, &MainWindow::onAsrListeningChanged);
+    connect(m_voice, &VoiceController::asrUnavailable, this, [this]() {
+        appendChat(tr("系统"), tr("语音识别不可用（缺少 powershell/麦克风），可用文字输入"));
+    });
 
     /* 大模型链路：控制器负责线程 / 探测 / 模型列表，UI 只接收结果与可用性 */
     connect(m_llmCtl, &LlmController::llmFinished, this, &MainWindow::onLlmFinished);
@@ -453,15 +457,6 @@ void MainWindow::onModelsReady(const QStringList &models)
     /* "配置的模型不在服务端列表中 → 切换并重新 configure" 已由 LlmController 处理 */
 }
 
-void MainWindow::onSpeakClicked()
-{
-    if (m_speakBtn->text() == tr("说话")) {
-        m_asr->startListening();
-    } else {
-        m_asr->stopListening();
-    }
-}
-
 void MainWindow::onAsrText(const QString &text)
 {
     appendChat(tr("语音"), text);
@@ -481,9 +476,8 @@ void MainWindow::onAsrListeningChanged(bool listening)
 
 void MainWindow::onTtsToggled(bool on)
 {
-    m_cfg.setTtsEnabled(on);
+    m_voice->onTtsToggled(on);
     m_ttsBtn->setText(on ? tr("播报：开") : tr("播报：关"));
-    m_tts->configure(on, m_cfg.ttsVoice());
 }
 
 /* ===================== 其他 ===================== */
@@ -509,15 +503,12 @@ QString MainWindow::stateJsonFor(int nodeId) const
 
 void MainWindow::speakState(int nodeId)
 {
-    if (!m_cfg.ttsEnabled() || !m_tts->available()) {
-        return;
-    }
     const NodeState *st = m_model->peek(nodeId);
     if (st == nullptr) {
         return;
     }
-    m_tts->speak(tr("节点 %1 当前光强 %2，阈值 %3，继电器 %4，%5 模式")
-                     .arg(nodeId).arg(st->light).arg(st->th)
-                     .arg(st->relay ? tr("吸合") : tr("断开"))
-                     .arg(st->mode == Proto::MODE_MANUAL ? tr("手动") : tr("自动")));
+    m_voice->speakState(tr("节点 %1 当前光强 %2，阈值 %3，继电器 %4，%5 模式")
+                            .arg(nodeId).arg(st->light).arg(st->th)
+                            .arg(st->relay ? tr("吸合") : tr("断开"))
+                            .arg(st->mode == Proto::MODE_MANUAL ? tr("手动") : tr("自动")));
 }

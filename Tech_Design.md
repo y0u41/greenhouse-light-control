@@ -151,9 +151,10 @@ greenhouse/
 │  └─ Projects/MDK-ARM/             # Keil 工程
 ├─ qtapp/                           # Qt 上位机
 │  ├─ CMakeLists.txt
-│  ├─ src/                          # MainWindow / NodeServer / NodeModel / ChartWidget /
-│  │                                # ControlPanel / TtsService / AsrService / LlmClient /
-│  │                                # CommandEngine / Config
+│  ├─ src/                          # MainWindow（纯 UI 装配 + 信号转发）/ NodeServer / NodeModel /
+│  │                                # ChartWidget / ControlPanel / LlmController（LLM 线程 + 探测）/
+│  │                                # VoiceController（TTS + ASR + 播报开关）/
+│  │                                # TtsService / AsrService / LlmClient / CommandEngine / Config
 │  └─ resources/
 ├─ tools/
 │  ├─ simulate_node.py              # 虚拟节点模拟器（多点位演示）
@@ -727,6 +728,8 @@ DISCONNECT ←──────── 网络断开 / 错误 / AT 超时 / 收�
 | 数据模型 | `NodeModel` | `QMap<int, NodeState>` 存各节点 adc/light/th/hys/relay/buzz/mode/online/silent/lastReportMs |
 | 曲线 | `ChartWidget` | QChart 实时光强曲线（每节点一条线，最近 300 点） |
 | 控制面板 | `ControlPanel` | 开关继电器、"切回自动"、阈值输入、报警测试；显示当前模式 |
+| 大模型链路 | `LlmController` | 大模型工作线程生命周期、模型列表、`/health` 周期探测与可用性判定；对外只发信号 |
+| 语音链路 | `VoiceController` | TTS 播报 + ASR 识别 + 播报开关；持有 `TtsService`/`AsrService`，对外只发信号 |
 | 语音合成 | `TtsService` | QTextToSpeech 封装，中文播报，运行时枚举语音 |
 | 语音识别 | `AsrService` | 以 `QProcess` 起 PowerShell + `System.Speech` 听写，识别结果经信号回主线程 |
 | 推理客户端 | `LlmClient` | QNetworkAccessManager 调 llama.cpp API，**工作线程内构造与使用** |
@@ -740,7 +743,10 @@ DISCONNECT ←──────── 网络断开 / 错误 / AT 超时 / 收�
 <!-- FACT:qt-threads BEGIN -->
 ```text
 主线程（UI 事件循环）
+ ├─ MainWindow（纯 UI 装配 + 信号转发）
  ├─ NodeServer（QTcpServer + socket 信号槽，Qt 事件循环天然异步）
+ ├─ LlmController（/health 周期探测 + 工作线程 QThread 句柄）
+ ├─ VoiceController（委派 TtsService / AsrService）
  ├─ ChartWidget / ControlPanel / TtsService / AsrService（均为 UI 线程对象）
  └─ CommandEngine + CommandAckGuard（校验与下发，轻量、非阻塞）
         │ 请求 / 结果 通过信号槽跨线程传递
