@@ -25,9 +25,9 @@ py firmware/prebuild_check.py
 | `HAL_Init` / `SysTick` | HAL 库 + `stm32f1xx_it.c::SysTick_Handler` | CubeMX 生成脚手架，**保留 SysTick_Handler** |
 | PF8 = ADC3_IN6 | `adc_light.c::MX_ADC3_Init()`（含 GPIOF 时钟+模拟输入） | **不要**在 CubeMX 启用 ADC3 |
 | PB6/PB7 = I2C1 | `eeprom.c::MX_I2C1_Init()`（含 GPIOB 时钟+AF_OD） | **不要**在 CubeMX 启用 I2C1 |
-| PA2/PA3 = USART2 | `esp8266.c::MX_USART2_Init()`（含 GPIOA 时钟+NVIC） | **不要**在 CubeMX 启用 USART2 |
+| PB10/PB11 = USART3 | `esp8266.c::MX_EspUart_Init()`（含 GPIOB 时钟+NVIC） | **不要**在 CubeMX 启用 USART3 |
 | PB8 蜂鸣器 / PE5 执行器 / PB5 心跳 | `control.c::Buzzer_Init/Actuator_Init` + `main.c::Led0_Init` | **不要**在 CubeMX 配这些 GPIO |
-| IWDG ≈2 s | `main.c::MX_IWDG_Init()` | **不要**在 CubeMX 启用 IWDG |
+| IWDG **≈6.4 s**（重装值 4000） | `main.c::MX_IWDG_Init()` | **不要**在 CubeMX 启用 IWDG |
 | LCD（FSMC） | 官方 BSP `lcd.c`（或桩） | 仅在引入 BSP 时由 BSP 自理 |
 
 **为什么这样分**：业务模块的 `MX_*_Init()` 调 `HAL_*_Init()` 时会回调弱 `HAL_*_MspInit`。若 CubeMX 也启用了这些外设，生成的 MSP 会再去配同一组 GPIO → 双初始化、引脚被抢、FSMC 时序被破坏（AGENTS 已知陷阱 #3）。让 CubeMX **不启用**这些外设，MSP 就是空桩，业务代码成为唯一 owner。

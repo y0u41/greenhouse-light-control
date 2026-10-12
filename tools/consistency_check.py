@@ -30,10 +30,10 @@ DOCS = ["PRD.md", "Tech_Design.md", "项目规划书.md", "AGENTS.md", "设计�
 LSI_HZ = 40000
 # AGENTS.md 与 docs/lessons.md 刻意保留了踩坑当时的旧值（≈2.0 s、RLR=1250）作为
 # 历史证据，**不能**参与比对，因此不列入。
-# 已知例外：firmware/CUBEMX_SETUP.md 里还有一处过时的 "IWDG ≈2 s"，它位于
-# firmware/ 目录、不在本守卫范围（改动 firmware/ 会与"最终提交不得含固件改动"冲突），
-# 需要单独跟进。
-IWDG_DOCS = ["Tech_Design.md", "设计报告.md", "项目规划书.md", "PRD.md"]
+# firmware/CUBEMX_SETUP.md 也纳入：它是**文档**（只是恰好住在 firmware/ 目录下），
+# 原先留有一处过时的 "IWDG ≈2 s"，是守卫唯一的盲区，现已修正并覆盖。
+IWDG_DOCS = ["Tech_Design.md", "设计报告.md", "项目规划书.md", "PRD.md",
+             "firmware/CUBEMX_SETUP.md"]
 # 文档里"声明看门狗超时"的写法（详见 iwdg_claims 的说明）
 IWDG_PERIOD_LINE = re.compile(r"≈\s*(\d+(?:\.\d+)?)\s*s\b")
 IWDG_ADJACENT = re.compile(r"IWDG\s*\**\s*≈")
@@ -124,7 +124,12 @@ def main() -> None:
     actions_h = read(QT / "protocol_actions.h")
     config_c = read(QT / "config.cpp")
     esp_c = read(FW / "Src" / "esp8266.c")
-    docs = {n: read(ROOT / n) for n in DOCS}
+    # docs 同时纳入 IWDG_DOCS 的条目：后者的文件（如 firmware/CUBEMX_SETUP.md）
+    # 不在 DOCS 里，但 IWDG 守卫要按名字取它的内容。
+    # **刻意不改 DOCS 本身** —— 免得影响任何遍历 DOCS 的既有检查（如版本号一致性）。
+    # 对本行之后只用 docs.values() 做"拼接后子串存在性"判断的检查而言，
+    # 多纳入几份文档只会增加可命中文本，不会让原本通过的断言失败。
+    docs = {n: read(ROOT / n) for n in dict.fromkeys(DOCS + IWDG_DOCS)}
     all_docs = "\n".join(docs.values())
 
     print("== 1. 动作词汇：契约 / 固件 / Qt 三处必须一致 ==")
