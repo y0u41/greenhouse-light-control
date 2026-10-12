@@ -43,6 +43,11 @@ public:
     int     ackTimeoutMs() const;             // 指令 ACK 超时（command_ack_guard）
     void    setAckTimeoutMs(int v);
 
+    /* 历史数据落盘文件（CSV）。默认 exe 同级 data/history.csv；
+     * 置空字符串 = 关闭落盘。相对路径按 exe 所在目录解析。 */
+    QString historyCsvPath() const;
+    void    setHistoryCsvPath(const QString &v);
+
 private:
     explicit Config(QObject *parent = nullptr);
     Config(const Config &) = delete;

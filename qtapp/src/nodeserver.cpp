@@ -5,10 +5,11 @@
 #include <QDateTime>
 #include <QJsonDocument>
 
-NodeServer::NodeServer(NodeModel *model, CommandAckGuard *guard, QObject *parent)
+NodeServer::NodeServer(NodeModel *model, CommandAckGuard *guard, CsvLogger *logger, QObject *parent)
     : QObject(parent)
     , m_model(model)
     , m_guard(guard)
+    , m_logger(logger)
 {
     connect(&m_server, &QTcpServer::newConnection, this, &NodeServer::onNewConnection);
     connect(m_guard, &CommandAckGuard::ackTimeout, this, &NodeServer::onAckTimeout);
@@ -141,6 +142,18 @@ void NodeServer::handleFrame(QTcpSocket *sock, const QByteArray &line)
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
 
     if (type == QLatin1String(Proto::TYPE_REPORT)) {
+        /* ★ 历史数据落盘在**这里**，三个理由：
+         *  1) 这里是"帧刚被解析出来"的唯一位置（原始 JSON + 服务端收到时刻），
+         *     落盘写的是**收到的事实**，而不是"界面最终显示的状态"；
+         *  2) 必须在下面的 ACK 守卫过滤**之前**：守卫只是"ACK 未确认期间不让旧
+         *     report 覆盖界面"，与"数据是否值得留档"无关。放后面会随守卫一起把
+         *     受控字段（relay/mode/buzz/th）丢出 CSV —— 那就是数据丢失；
+         *  3) 不放 NodeModel::applyReport：那是**应用状态**的地方（有字段过滤、
+         *     还会被 ack/evt 复用，而 evt 帧只有 adc/light），落盘属于传输层职责。 */
+        if (m_logger != nullptr) {
+            m_logger->appendReport(o, now);
+        }
+
         // ACK 未确认期间，受控字段（relay/mode/buzz/th）不让旧 report 回写，
         // 只放行 light/adc/hys —— 这就是"服务端权威渲染"的竞态防护。
         QSet<QString> fields;

@@ -20,6 +20,7 @@
 #include <QtTest/QtTest>
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -33,10 +34,12 @@
 #include <QSet>
 #include <QString>
 #include <QStringList>
+#include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <QVector>
 
 #include "commandengine.h"
+#include "csvlogger.h"
 #include "protocol_actions.h"
 
 namespace {
@@ -314,6 +317,10 @@ private slots:
     void parityWithPythonSchema();
     void paritySnapshotIsCurrent();
     void schemaVocabularyMatchesCpp();
+
+    // ---- ★ 历史数据落盘（CSV）----
+    void csvLoggerWritesHeaderAndRows();
+    void csvLoggerFailsSoftlyOnUnwritablePath();
 
 private:
     QVector<Case> m_cases;
@@ -717,6 +724,177 @@ void TestCommandEngine::schemaVocabularyMatchesCpp()
     QCOMPARE(Proto::TH_DEFAULT, 2000);
     QVERIFY(!Proto::isValidAction(QStringLiteral("query")));
     QVERIFY(Proto::isValidAction(QLatin1String(Proto::ACTION_GET_STATE)));
+}
+
+/* ===================== 历史数据落盘（CSV）=====================
+ * PRD「数据存储」声明"历史数据：Qt 端 CSV 或 SQLite 落盘"，此前没有实现
+ * （qtapp/src 里除 ASR 临时文件外没有任何 QFile/QTextStream/QSql 使用）。
+ * 这两条用例把"声明"变成机器可验证的事实：列/表头/多节点/追加语义/失败降级。
+ */
+
+namespace {
+
+/* 拆 CSV 行：行尾是 CRLF（见 csvlogger.cpp 的取舍），空行丢弃。 */
+QStringList csvLines(const QString &path, bool *ok = nullptr)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        if (ok != nullptr) {
+            *ok = false;
+        }
+        return {};
+    }
+    if (ok != nullptr) {
+        *ok = true;
+    }
+    return QString::fromUtf8(f.readAll())
+        .split(QStringLiteral("\r\n"), Qt::SkipEmptyParts);
+}
+
+/* 造一帧 report：字段与固件 Protocol_SendReport 一致（顺序无关，按 key 取值）。 */
+QJsonObject reportFrame(int node, int adc, int light, int th = 2048, int hys = 150,
+                        int relay = 0, int buzz = 0, int mode = 0)
+{
+    QJsonObject o;
+    o.insert(QStringLiteral("node"), node);
+    o.insert(QStringLiteral("type"), QStringLiteral("report"));
+    o.insert(QStringLiteral("adc"), adc);
+    o.insert(QStringLiteral("light"), light);
+    o.insert(QStringLiteral("th"), th);
+    o.insert(QStringLiteral("hys"), hys);
+    o.insert(QStringLiteral("relay"), relay);
+    o.insert(QStringLiteral("buzz"), buzz);
+    o.insert(QStringLiteral("mode"), mode);
+    return o;
+}
+
+} // namespace
+
+void TestCommandEngine::csvLoggerWritesHeaderAndRows()
+{
+    // 显式给模板：本测试用 QTEST_APPLESS_MAIN，没有 QCoreApplication 实例
+    QTemporaryDir dir(QDir::tempPath() + QStringLiteral("/glc_csv_XXXXXX"));
+    QVERIFY2(dir.isValid(), "无法创建临时目录");
+
+    // 顺带验证"目录不存在要能自动创建"：路径里嵌两层不存在的目录
+    const QString path = dir.filePath(QStringLiteral("nested/data/history.csv"));
+
+    CsvLogger logger;
+    QVERIFY2(logger.open(path), qPrintable(QStringLiteral("打开失败：%1").arg(path)));
+    QVERIFY(logger.isOpen());
+    QVERIFY(QFile::exists(path));
+
+    const qint64 t1 = QDateTime::fromString(QStringLiteral("2026-01-02T03:04:05.678+08:00"),
+                                            Qt::ISODateWithMs)
+                          .toMSecsSinceEpoch();
+
+    QJsonObject f1 = reportFrame(1, 1234, 2861, 2048, 150, 1, 0, 1);
+    logger.appendReport(f1, t1);
+
+    QJsonObject f2 = reportFrame(7, 3000, 1095, 2048, 150, 0, 1, 0);  // 多节点
+    logger.appendReport(f2, t1 + 1000);
+    logger.close();
+
+    bool ok = false;
+    const QStringList lines = csvLines(path, &ok);
+    QVERIFY(ok);
+    QCOMPARE(lines.size(), 3);                     // 表头 + 2 行
+    QCOMPARE(lines.at(0), CsvLogger::headerLine());  // 表头与实现同源
+    QCOMPARE(lines.at(0), QStringLiteral("timestamp,node,adc,light,th,hys,relay,buzz,mode"));
+
+    const QStringList c1 = lines.at(1).split(QLatin1Char(','));
+    const QStringList c2 = lines.at(2).split(QLatin1Char(','));
+    QCOMPARE(c1.size(), 9);
+    QCOMPARE(c2.size(), 9);
+
+    // ★ 每个字段与帧逐一对应（列序 timestamp,node,adc,light,th,hys,relay,buzz,mode）
+    QCOMPARE(c1.at(1), QStringLiteral("1"));
+    QCOMPARE(c1.mid(2), (QStringList{QStringLiteral("1234"), QStringLiteral("2861"),
+                                     QStringLiteral("2048"), QStringLiteral("150"),
+                                     QStringLiteral("1"), QStringLiteral("0"),
+                                     QStringLiteral("1")}));
+    // ★ 多节点必须能区分
+    QCOMPARE(c2.at(1), QStringLiteral("7"));
+    QCOMPARE(c2.mid(2), (QStringList{QStringLiteral("3000"), QStringLiteral("1095"),
+                                     QStringLiteral("2048"), QStringLiteral("150"),
+                                     QStringLiteral("0"), QStringLiteral("1"),
+                                     QStringLiteral("0")}));
+
+    // 时间戳：ISO8601 且能还原回服务端收到时刻（不依赖本机时区）
+    QCOMPARE(QDateTime::fromString(c1.at(0), Qt::ISODateWithMs).toMSecsSinceEpoch(), t1);
+    QCOMPARE(QDateTime::fromString(c2.at(0), Qt::ISODateWithMs).toMSecsSinceEpoch(), t1 + 1000);
+
+    // 缺字段写空列，不用 0 冒充（0 是合法取值）
+    CsvLogger sparse;
+    const QString p2 = dir.filePath(QStringLiteral("sparse.csv"));
+    QVERIFY(sparse.open(p2));
+    QJsonObject only;                              // 只有 node + light：其余列必须留空
+    only.insert(QStringLiteral("node"), 3);
+    only.insert(QStringLiteral("light"), 77);
+    sparse.appendReport(only, t1);
+    sparse.close();
+    const QStringList sl = csvLines(p2);
+    QCOMPARE(sl.size(), 2);
+    const QStringList sp = sl.at(1).split(QLatin1Char(','));
+    QCOMPARE(sp.size(), 9);
+    QCOMPARE(QDateTime::fromString(sp.at(0), Qt::ISODateWithMs).toMSecsSinceEpoch(), t1);
+    QCOMPARE(sp.mid(1), (QStringList{QStringLiteral("3"), QString(),
+                                     QStringLiteral("77"), QString(), QString(),
+                                     QString(), QString(), QString()}));
+
+    // ★ 追加语义：再次打开不得重写表头、不得清空既有行
+    CsvLogger again;
+    QVERIFY(again.open(path));
+    again.appendReport(f1, t1 + 2000);
+    again.close();
+
+    const QStringList l2 = csvLines(path);
+    QCOMPARE(l2.size(), 4);
+    QCOMPARE(l2.at(0), CsvLogger::headerLine());
+    QCOMPARE(l2.at(3).split(QLatin1Char(',')).at(1), QStringLiteral("1"));
+    QVERIFY(l2.at(3).contains(QStringLiteral("2861")));
+}
+
+void TestCommandEngine::csvLoggerFailsSoftlyOnUnwritablePath()
+{
+    QTemporaryDir dir(QDir::tempPath() + QStringLiteral("/glc_csv_bad_XXXXXX"));
+    QVERIFY2(dir.isValid(), "无法创建临时目录");
+
+    // 用一个普通文件占住"目录名"：mkpath 必然失败 → 走打开失败分支
+    const QString blocker = dir.filePath(QStringLiteral("blocker"));
+    {
+        QFile b(blocker);
+        QVERIFY(b.open(QIODevice::WriteOnly));
+        b.write("x");
+        b.close();
+    }
+    const QString path = blocker + QStringLiteral("/child/history.csv");
+
+    CsvLogger logger;
+    int messages = 0;
+    QObject::connect(&logger, &CsvLogger::logMessage,
+                     [&messages](const QString &) { ++messages; });
+
+    QVERIFY2(!logger.open(path), "不可写的路径不该报告成功");
+    QVERIFY(!logger.isOpen());
+    QCOMPARE(messages, 1);              // 只报一次
+
+    // 打开失败后继续来帧：必须静默跳过（不崩溃、不再报错、不刷屏）
+    for (int i = 0; i < 100; ++i) {
+        logger.appendReport(reportFrame(1, 1000 + i, 3095 - i), 1000 + i);
+    }
+    QCOMPARE(messages, 1);
+    QVERIFY(!QFile::exists(path));
+
+    // 空路径 = 主动关闭落盘：同样只提示一次，且不创建任何文件
+    CsvLogger off;
+    int offMessages = 0;
+    QObject::connect(&off, &CsvLogger::logMessage,
+                     [&offMessages](const QString &) { ++offMessages; });
+    QVERIFY(!off.open(QString()));
+    QCOMPARE(offMessages, 1);
+    off.appendReport(reportFrame(1, 1, 4094), 1234);
+    QCOMPARE(offMessages, 1);
 }
 
 QTEST_APPLESS_MAIN(TestCommandEngine)

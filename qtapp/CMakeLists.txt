@@ -42,6 +42,7 @@ set(PROJECT_SOURCES
     src/nodeserver.cpp
     src/commandengine.cpp
     src/command_ack_guard.cpp
+    src/csvlogger.cpp
     src/llmclient.cpp
     src/chartwidget.cpp
     src/controlpanel.cpp
@@ -56,6 +57,7 @@ set(PROJECT_HEADERS
     src/nodeserver.h
     src/commandengine.h
     src/command_ack_guard.h
+    src/csvlogger.h
     src/llmclient.h
     src/chartwidget.h
     src/controlpanel.h
@@ -121,12 +123,14 @@ if(GREENHOUSE_BUILD_TESTS)
         src/nodemodel.cpp
         src/nodeserver.cpp
         src/command_ack_guard.cpp
+        src/csvlogger.cpp
         src/config.cpp
         src/protocol_actions.h
         src/commandengine.h
         src/nodemodel.h
         src/nodeserver.h
         src/command_ack_guard.h
+        src/csvlogger.h
         src/config.h
     )
 

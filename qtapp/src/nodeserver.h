@@ -10,13 +10,17 @@
 
 #include "nodemodel.h"
 #include "command_ack_guard.h"
+#include "csvlogger.h"
 
 // TCP 服务：监听 9092，多节点接入、行分隔 JSON 解析、离线判定、ACK 守卫接入点。
 class NodeServer : public QObject
 {
     Q_OBJECT
 public:
-    explicit NodeServer(NodeModel *model, CommandAckGuard *guard, QObject *parent = nullptr);
+    /* logger 可为 nullptr（单测/无落盘场景）。落盘点选在 handleFrame 的 report 分支，
+     * 而不是 NodeModel::applyReport —— 理由见 nodeserver.cpp 里的长注释。 */
+    explicit NodeServer(NodeModel *model, CommandAckGuard *guard,
+                        CsvLogger *logger = nullptr, QObject *parent = nullptr);
 
     bool start(const QString &bindAddr, quint16 port, QString *err = nullptr);
     void stop();
@@ -52,6 +56,7 @@ private:
 
     NodeModel *m_model;
     CommandAckGuard *m_guard;
+    CsvLogger *m_logger = nullptr;   // 历史数据落盘（可为 nullptr）
     QTcpServer m_server;
     QHash<QTcpSocket *, QByteArray> m_bufs;
     QHash<QTcpSocket *, int> m_sockNode;

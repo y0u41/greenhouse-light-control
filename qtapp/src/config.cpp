@@ -1,5 +1,8 @@
 #include "config.h"
 
+#include <QCoreApplication>
+#include <QDir>
+
 Config::Config(QObject *parent)
     : QObject(parent)
     , m_s(QStringLiteral("Greenhouse"), QStringLiteral("LightControl"))
@@ -126,4 +129,18 @@ int Config::ackTimeoutMs() const
 void Config::setAckTimeoutMs(int v)
 {
     m_s.setValue(QStringLiteral("node/ackTimeoutMs"), v);
+}
+
+QString Config::historyCsvPath() const
+{
+    /* 默认放 exe 同级的 data/ 目录：不依赖 CWD（双击启动时 CWD 不可预期），
+     * 也不写进用户 AppData —— 答辩演示时"数据文件就在程序旁边"，一眼能找到。 */
+    const QString def = QDir(QCoreApplication::applicationDirPath())
+                            .filePath(QStringLiteral("data/history.csv"));
+    return m_s.value(QStringLiteral("storage/historyCsv"), def).toString();
+}
+
+void Config::setHistoryCsvPath(const QString &v)
+{
+    m_s.setValue(QStringLiteral("storage/historyCsv"), v);
 }

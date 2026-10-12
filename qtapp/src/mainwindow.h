@@ -16,6 +16,7 @@
 #include "nodeserver.h"
 #include "commandengine.h"
 #include "command_ack_guard.h"
+#include "csvlogger.h"
 #include "llmclient.h"
 #include "chartwidget.h"
 #include "controlpanel.h"
@@ -80,6 +81,7 @@ private:
     Config &m_cfg;
     NodeModel *m_model;
     CommandAckGuard *m_guard;
+    CsvLogger *m_csvLogger;
     NodeServer *m_server;
     CommandEngine *m_engine;
     ChartWidget *m_chart;

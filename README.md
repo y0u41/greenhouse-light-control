@@ -73,7 +73,8 @@ firmware/                     STM32 固件（HAL）
 qtapp/                        Qt 6 上位机
 ├─ CMakeLists.txt
 └─ src/                       MainWindow / NodeServer / NodeModel / CommandEngine / CommandAckGuard /
-                              LlmClient / ChartWidget / ControlPanel / TtsService / AsrService / Config
+                              CsvLogger（历史数据落盘）/ LlmClient / ChartWidget / ControlPanel /
+                              TtsService / AsrService / Config
                               protocol_actions.h（协议词汇 C++ 侧单一事实源）
 tools/
 ├─ protocol_schema.py         协议契约单一事实源（动作词汇 + 字段校验）
@@ -161,6 +162,27 @@ py tools\simulate_node.py --id 2 --port 9092
 3. **Windows 防火墙放行 9092 入站**，否则节点连不上（Qt 已绑 `0.0.0.0`，缺的是防火墙规则）
 4. PC 建议设静态 IP 或 DHCP 保留，避免 IP 变化后节点配置失配
 5. 上电后应看到：LCD 显示光强/阈值/执行器/模式；LED0 每 5 s 翻转（心跳）；手电照射 → `light` 上升 → 超阈值时执行器吸合 + 蜂鸣器响；遮挡回落到 `th - hys` 以下才释放
+
+### 历史数据落盘（CSV）
+
+PRD「数据组织 · 数据存储」要求"历史数据：Qt 端 CSV 或 SQLite 落盘，便于绘制长期曲线"。
+实现取 **每帧 append CSV**（不做 SQLite）；曲线仍只保留最近 `chart/maxPoints` 点，长期曲线以文件为准。
+实现与取舍见 `qtapp/src/csvlogger.h`，本表是**运行视角的唯一说明**（PRD 只声明需求，不重复这些字段）。
+
+| 项 | 值 |
+| --- | --- |
+| 默认路径 | exe 同级 `data/history.csv`（如 `qtapp\build\data\history.csv`）；父目录不存在时自动创建 |
+| 配置项 | QSettings `storage/historyCsv`（组织 Greenhouse / 应用 LightControl）；相对路径按 **exe 目录**解析；置空字符串 = 关闭落盘 |
+| 表头 | `timestamp,node,adc,light,th,hys,relay,buzz,mode` |
+| 时间戳 | ISO8601 毫秒 + 显式时区偏移，如 `2026-10-12T21:01:51.410+08:00` |
+| 行内容 | 与 `report` 帧字段一一对应；`node` 列区分多点位（同一文件含多节点行）；帧里缺的字段写**空列**，不用 `0` 冒充（`0` 是合法取值） |
+| 编码/行尾 | UTF-8 无 BOM，CRLF（Windows 下双击可进 Excel/WPS） |
+| 何时写 | 收到 `report` 帧即刻 append；写点在 ACK 守卫过滤**之前** —— 守卫只影响界面渲染，不影响留档 |
+| flush | 每帧 `write`（进程内无缓冲，强杀/结束任务不丢已写行）+ 每 8 行或每 1 s `flush` 一次，退出时必 flush |
+| 失败行为 | 打开/写入失败只提示**一次**（状态栏 + 对话区 + `qWarning`），之后静默跳过，程序照常运行 |
+| 入仓 | 数据文件**不入仓**（`.gitignore` 含 `*.csv`）；`csvlogger.h/.cpp` 等代码与本文档入仓 |
+
+> 只记 `report`；`ack`/`evt` 不入盘（`evt` 只带 `adc`/`light`，`ack` 是同一状态的回执，重复留档无新信息）。
 
 ## 里程碑状态
 

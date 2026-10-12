@@ -23,6 +23,8 @@ ctest --test-dir D:\glc\qtapp\build --output-on-failure
 | target `test_commandengine` | 表驱动测 `CommandEngine::validate` / `buildCmd` |
 | ctest `commandengine` | 上述可执行文件 |
 | ctest `protocol_parity_python` | Python 侧 standalone 报告 |
+| `csvLoggerWritesHeaderAndRows` | 历史数据落盘：表头 / 9 列逐字段对应 / 多节点区分 / 追加不重写表头 / 缺字段写空列 / 父目录自动创建 |
+| `csvLoggerFailsSoftlyOnUnwritablePath` | 落盘失败降级：只报一次、之后静默跳过、不创建文件、不崩溃 |
 
 被测翻译单元是**真实实现**（`src/commandengine.cpp` 等），测试里没有第二份校验逻辑。
 
@@ -51,8 +53,8 @@ python tools/check_validate_parity.py --write
   `why` 是给人看的 **UI 文案**，不是协议语义。
 - 判定一致 ≠ 看不见文案差异：差异仍逐条打印，并登记在本节台账里。
 
-`ctest` 现状：**2/2 passed**，Qt 测试 `Totals: 47 passed, 0 failed`（33 条用例 × 判定 +
-9 条 buildCmd + 5 个框架用例）。
+`ctest` 现状：**2/2 passed**，Qt 测试 `Totals: 49 passed, 0 failed`（33 条用例 × 判定 +
+9 条 buildCmd + 5 个框架用例 + 2 条历史数据落盘）。
 
 守卫**不会退化成永远绿灯**（这是本口径最需要证明的一点）：把任一条用例的 `expect`
 改错、或改 `commandengine.cpp` 的任一边界，`commandengine` 与 `protocol_parity_python`

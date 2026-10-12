@@ -19,7 +19,8 @@ MainWindow::MainWindow(QWidget *parent)
     , m_cfg(Config::instance())
     , m_model(new NodeModel(this))
     , m_guard(new CommandAckGuard(this, m_cfg.ackTimeoutMs()))
-    , m_server(new NodeServer(m_model, m_guard, this))
+    , m_csvLogger(new CsvLogger(this))
+    , m_server(new NodeServer(m_model, m_guard, m_csvLogger, this))
     , m_engine(new CommandEngine(m_server, m_model, this))
     , m_chart(new ChartWidget(this))
     , m_panel(new ControlPanel(this))
@@ -32,6 +33,10 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_server->setOfflineTimeoutMs(m_cfg.offlineTimeoutMs());
     m_chart->setMaxPoints(m_cfg.chartMaxPoints());
+
+    /* 历史数据落盘：在节点开始接入**之前**打开，避免启动瞬间丢帧。
+     * 失败（无权限/磁盘满/目录建不出来）只提示一次并降级，不阻断启动。 */
+    m_csvLogger->open(m_cfg.historyCsvPath());
 
     /* 服务器启动失败必须显式报错（端口被占用等），不能静默降级 */
     QString err;
@@ -157,6 +162,13 @@ void MainWindow::wireSignals()
     connect(m_server, &NodeServer::nodeOffline, this, &MainWindow::onNodeOffline);
     connect(m_server, &NodeServer::nodeSilent, this, &MainWindow::onNodeSilent);
     connect(m_server, &NodeServer::logMessage, this, &MainWindow::onLogMessage);
+
+    /* 落盘状态（成功时的文件路径 / 失败时的原因）只发一两条，
+     * 同时进状态栏与对话区：对话区留痕，便于事后确认数据到底写哪去了。 */
+    connect(m_csvLogger, &CsvLogger::logMessage, this, [this](const QString &msg) {
+        onLogMessage(msg);
+        appendChat(tr("系统"), msg);
+    });
 
     connect(m_nodeCombo, &QComboBox::currentIndexChanged,
             this, &MainWindow::onCurrentNodeChanged);
