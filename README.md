@@ -32,13 +32,14 @@ ESP8266(AT 透传) ──TCP:9092──▶ Qt NodeServer ──▶ 曲线/控制
 | 协议契约 | `py tools/contract_test.py` | **11/11 通过** |
 | 虚拟节点 | `py tools/simulate_node.py --selftest` | **通过** |
 | 上位机联调 | 启动 exe + 虚拟节点接入 | **监听 `0.0.0.0:9092`，长连接 ESTABLISHED** |
+| 真机硬件在环 | ST-Link SWD + COM3 日志 | **T01 换算/量程、T02 执行器+蜂鸣器+GPIO 极性、T03 释放方向、T08 上电初始状态已实测**（详见 [设计报告.md §8.4](设计报告.md)） |
 
 固件资源占用（实测，来自 `firmware/Output/greenhouse.map`）：
 
 | 项 | 值 | 占比 |
 | --- | --- | --- |
-| Flash | Code 57260 + RO 13360 + RW 32 = **70652 B（69.0 KB）** | 512 KB 的 **13.5%** |
-| RAM | RW 32 + ZI 3136 = **3168 B（3.1 KB）** | 64 KB 的 **4.8%** |
+| Flash | Code 64012 + RO 14212 + RW 24 = **78248 B（76.4 KB）** | 512 KB 的 **14.9%** |
+| RAM | RW 24 + ZI 7672 = **7696 B（7.5 KB）** | 64 KB 的 **11.7%** |
 
 ## 一键构建（推荐）
 
@@ -264,10 +265,10 @@ py tools\package_submission.py -o D:\提交.zip   # 指定输出路径
 
 | 里程碑 | 内容 | 状态 |
 | --- | --- | --- |
-| M1 | ADC3/PF8 采集、8 次均值、`light=4095-adc`、LCD 显示 | 代码完成，**已编译通过**，待上板实测 |
-| M2 | 回差状态机、手动优先、EEPROM 掉电记忆、IWDG、LED0 心跳 | 代码完成，**已编译通过**，待上板实测 |
+| M1 | ADC3/PF8 采集、8 次均值、`light=4095-adc`、LCD 显示 | **已上板**：换算/量程/LCD `id=0x7796 480×320` 实测通过；**光照物理方向待人手实验** |
+| M2 | 回差状态机、手动优先、EEPROM 掉电记忆、IWDG、LED0 心跳 | **已上板**：执行器吸合/释放 + 蜂鸣器 + GPIO 极性实测通过；**24C02 写通路异常导致 `set_th` 恒回 `err`，掉电记忆不可测**（见 [设计报告.md §8.4](设计报告.md) N-1/N-2） |
 | M2b | 借用继电器到位后切换 4 行宏复测 | 待硬件 |
-| M3 | ESP8266 联网、TCP 透传、行缓冲、report 上报 | 代码完成，**已编译通过**，待上板实测 |
+| M3 | ESP8266 联网、TCP 透传、行缓冲、report 上报 | **已上板**：AT 建链成功过（`WIFI CONNECTED`→`GOT IP`→`CIPSTART`，`net=1`，PC 侧收到 report）；**AP `603` 当前不可达**，重连/上报待恢复网络后复测 |
 | M4 | Qt NodeServer(9092)、控制面板、曲线、离线判定 | **已构建并运行验证**（监听 0.0.0.0:9092，虚拟节点可接入） |
 | M5 | LlmClient 工作线程、System Prompt、CommandEngine 校验 | 代码完成，待与 llama-server 实测 |
 | M6 | TTS/ASR、三路指令统一 | 代码完成；**TTS 需补装模块**，ASR 中文精度待实测 |
