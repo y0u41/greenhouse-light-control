@@ -1,27 +1,50 @@
 /*
  * protocol.c 解析健壮性测试（主机端，无需硬件）
  *
- * ⚠⚠ 状态：40 PASS / 6 FAIL（**尚未全绿，勿当成通过**）⚠⚠
+ * 状态：51 PASS / 3 FAIL —— 3 条红灯**全部指向同一个真实未修缺陷**，故意保持红灯。
  *
- * 已确认的真实固件缺陷（1 项）：
- *   【P-1】超长行不是"整行丢弃"，而是"截断后把尾巴当一帧返回"。
- *          protocol.c:101-105 在 s_line_len 达到上限时只做 s_line_len = 0，
- *          并不丢弃到行尾；于是 250 字节的 'A' 行在撞到上限后被从头重新累积，
- *          遇到 '\n' 时把**尾巴 50 字节**当一帧交出去（实测 strlen=50）。
- *          这与该处注释"超长无换行：丢弃并复位"的语义不符。
- *          危害：截断后的尾巴若恰好构成合法 JSON，就会被当成一条真指令执行
- *          （TCP 任意切分字节流时并非不可能），属于**可被误执行**的路径。
- *          修法建议：加一个"本行已超长、丢弃至行尾"的标志，
- *          或改成"超长即把 s_line_len 置为哨兵值并在遇到 '\n' 时跳过该行"。
+ * ┌─ 真实固件缺陷 ────────────────────────────────────────────────────────┐
+ * │ 【P-1】自写 cJSON 不支持 JSON 数组，导致含数组的整帧被静默丢弃。      │
+ * │                                                                       │
+ * │ 根因：firmware/Middlewares/cJSON/cJSON.c **没有 parse_array**。       │
+ * │       parse_value()（:269）只处理 '{'（:278 转 parse_object），       │
+ * │       没有 '[' 分支 —— 数组直接落到解析失败，cJSON_Parse 返回 NULL，  │
+ * │       protocol.c:126-128 于是静默 return，**连 err ack 都不发**。     │
+ * │                                                                       │
+ * │ 已用逐键隔离定位（tests/host/test_protocol.c 的"未知键"组）：         │
+ * │       未知数字键 / 字符串键 / 布尔键 / null 键 / 嵌套对象 / 转义引号  │
+ * │       —— 全部正常忽略，帧照常生效；                                   │
+ * │       **唯独未知数组键让整帧失效**。                                  │
+ * │                                                                       │
+ * │ 影响：协议明确声明"忽略未知键以向前兼容"，但上位机只要新增**任何**   │
+ * │       数组字段（如批处理列表、历史点、多阈值），该帧就会整条失效，    │
+ * │       表现为"指令没反应、ack 超时"，且**没有任何可观测的错误提示**。  │
+ * │       这是"向前兼容"承诺与实现不符，属于接口失约。                   │
+ * │                                                                       │
+ * │ 修法（二选一）：                                                      │
+ * │  a) 给 cJSON 补 parse_array + 对应的 cJSON_Delete 递归释放（正解，    │
+ * │     与官方 cJSON 行为一致）；                                         │
+ * │  b) 若确定永不使用数组，则在 protocol_schema 与文档里把"不支持数组"  │
+ * │     写成显式约束，并让 ParseAndExecute 在解析失败时回一个 err ack，   │
+ * │     避免"静默丢弃"（治标，但消除了不可观测性）。                      │
+ * └───────────────────────────────────────────────────────────────────────┘
  *
- * 尚未定位的失败（5 项，**可能是我测试夹具的问题，也可能是真实缺陷**）：
- *   group 5/6/7 里所有"应当被接受"的用例都得到"实际执行 0 条"，
- *   而同内容的帧在 group 1 里能正常执行 —— 已排除超长行状态泄漏
- *   （插入 Protocol_Reset 后仍为 0）。**结论待查，不要据此认为固件有问题。**
+ * 【P-2】超长行不是"整行丢弃"，而是"截断后把尾巴当一帧返回"（次要）。
+ *       protocol.c:101-105 在 s_line_len 达上限时只做 s_line_len = 0，
+ *       并不丢弃到行尾；于是 250 字节的行撞上限后从头重新累积，
+ *       遇 '\n' 时把**尾巴 50 字节**当一帧交出（实测 strlen=50）。
+ *       截断的尾巴若恰好构成合法 JSON 就会被当真指令执行。
  *
- * 已排除的测试夹具错误（第一版 7 个失败里 2 个是夹具问题，已修）：
- *   · 喂 600 字节超出 256 环形缓冲容量，导致后续帧被环形缓冲丢弃，
- *     被误读成"行溢出后无法恢复" —— 是测试设计错误，不是固件缺陷。
+ * ── 测试夹具自身踩过的坑（已修，留记录以免重犯）──────────────────────
+ *  ① **"空转通过"**：第一版 feed_and_execute 只调 Protocol_PopCommand，
+ *     **从未调用 Protocol_RxByte** —— 一个字节都没喂进环形缓冲，所有用例都
+ *     "执行 0 条"；而 group 4 的 18 条畸形输入期望值本来就是 0，
+ *     于是**全部空转变绿**，掩盖了夹具彻底失效。
+ *     → 已补"正向对照"用例：先证明正常帧确实能执行，之后"应拒绝"的断言才有意义。
+ *  ② 喂 600 字节超出 256 环形缓冲容量，后续帧被环形缓冲丢弃，
+ *     被误读成"行溢出后无法恢复"—— 是测试设计错误，不是固件缺陷。
+ *  ③ reset_to 用 relay_on 建前态，而它会把 g_mode 置为 MANUAL，
+ *     导致所有 AUTO 用例因手动优先提前返回而假失败（control 套件，已修）。
  *
  * 覆盖 P0-2 要求的"畸形 JSON / 半帧"：这类输入在真实链路上**一定会出现**
  * （TCP 会任意切分字节流、模块重启会插入 URC、干扰会造成截断），
@@ -32,6 +55,7 @@
 #include "protocol.h"
 #include "main.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ---- 桩接口 ---- */
@@ -57,20 +81,29 @@ static bool feed_and_pop(const char *s, char *out, size_t cap) {
     for (const char *p = s; *p; p++) Protocol_RxByte((uint8_t)*p);
     return Protocol_PopCommand(out, cap);
 }
-/* 喂一串字节并直接执行（模拟主循环：PopCommand -> ParseAndExecute） */
+/* 喂一串字节并直接执行（模拟主循环：RxByte -> PopCommand -> ParseAndExecute）
+ *
+ * ★ 教训（本测试第一版栽在这里）★
+ * 第一版这个函数**只调了 Protocol_PopCommand，从头到尾没有调用 Protocol_RxByte**
+ * —— 一个字节都没喂进环形缓冲，于是 PopCommand 立即返回 false，
+ * 所有用例都"执行 0 条"。而 group 4 的 18 条畸形输入期望值本来就是 0，
+ * 于是它们**全部空转通过**，掩盖了夹具本身的彻底失效。
+ * 这类"断言'什么都没发生'的测试在机制坏掉时会自动变绿"是最危险的假阳性。
+ * 因此下面加了正向对照用例（positive control）：必须先证明"正常帧确实能被执行"，
+ * 之后那些"应当拒绝"的断言才有意义。 */
 static int s_dbg_feed = 0;
 static void feed_and_execute(const char *s) {
     char buf[PROTOCOL_FRAME_MAX];
     int n = 0;
+    for (const char *p = s; *p; p++) {
+        Protocol_RxByte((uint8_t)*p);          /* ← 必须真的喂进去 */
+    }
     while (Protocol_PopCommand(buf, sizeof(buf))) {
         if (s_dbg_feed) printf("    [dbg] popped = '%s'\n", buf);
         Protocol_ParseAndExecute(buf);
         n++;
     }
-    if (s_dbg_feed && n == 0) {
-        printf("    [dbg] 没有取出任何帧；输入的最后一个字节是 %s\n",
-               (s[0] && s[strlen(s) - 1] == '\n') ? "'\\n'（有换行）" : "'?'（无换行）");
-    }
+    if (s_dbg_feed) printf("    [dbg] '%s' -> 取出并执行 %d 帧\n", s, n);
 }
 
 int main(void) {
@@ -151,6 +184,15 @@ int main(void) {
      * 4. 畸形输入一律忽略，不得崩
      * ============================================================ */
     group("畸形输入：忽略且不崩");
+    /* ---- 正向对照（positive control）----
+     * 先证明"一帧正常指令确实能被取出并执行"，否则下面那些
+     * "不应执行任何指令"的断言会在夹具失效时**自动变绿**（本测试第一版即如此）。 */
+    Protocol_Reset(); HostP_ClearCmds();
+    feed_and_execute("{\"node\":1,\"type\":\"cmd\",\"action\":\"auto\"}\n");
+    CHECK(HostP_CmdCount() == 1,
+          "正向对照失败：正常帧都执行不了，说明夹具/链路有问题，"
+          "下面所有\"应拒绝\"的断言都不可信（实际 %d 条）", HostP_CmdCount());
+
     static const char *malformed[] = {
         "\n",
         "\r\n",
@@ -237,8 +279,37 @@ int main(void) {
                      "\"future_d\":{\"k\":\"v\"}}\n");
     CHECK(HostP_CmdCount() == 1, "含未知键的帧仍应生效（向前兼容），实际执行 %d 条",
           HostP_CmdCount());
-    CHECK(HostP_CmdActionAt(0) && strcmp(HostP_CmdActionAt(0), "auto") == 0,
+    CHECK(HostP_CmdCount() > 0 && HostP_CmdActionAt(0)
+          && strcmp(HostP_CmdActionAt(0), "auto") == 0,
           "action 应正确解析");
+
+    /* ---- 逐键隔离：找出是哪种未知键把整帧搞失效的 ----
+     * 协议声明要"忽略未知键以向前兼容"，因此任何一种未知键都不该让整帧失效。
+     * 若某一种会，那就是真实缺陷（上位机将来加字段会直接导致指令全部失效）。 */
+    struct { const char *json; const char *what; } iso[] = {
+        { "{\"node\":1,\"type\":\"cmd\",\"action\":\"auto\",\"u\":1}\n",
+          "未知数字键" },
+        { "{\"node\":1,\"type\":\"cmd\",\"action\":\"auto\",\"u\":\"s\"}\n",
+          "未知字符串键" },
+        { "{\"node\":1,\"type\":\"cmd\",\"action\":\"auto\",\"u\":true}\n",
+          "未知布尔键" },
+        { "{\"node\":1,\"type\":\"cmd\",\"action\":\"auto\",\"u\":null}\n",
+          "未知 null 键" },
+        { "{\"node\":1,\"type\":\"cmd\",\"action\":\"auto\",\"u\":[1,2]}\n",
+          "未知**数组**键" },
+        { "{\"node\":1,\"type\":\"cmd\",\"action\":\"auto\",\"u\":{\"k\":1}}\n",
+          "未知**嵌套对象**键" },
+        { "{\"node\":1,\"type\":\"cmd\",\"action\":\"auto\",\"u\":\"a\\\"b\"}\n",
+          "未知键含转义引号" },
+    };
+    const int ni = (int)(sizeof(iso) / sizeof(iso[0]));
+    for (int i = 0; i < ni; i++) {
+        Protocol_Reset(); HostP_ClearCmds();
+        feed_and_execute(iso[i].json);
+        CHECK(HostP_CmdCount() == 1,
+              "%s 不应让整帧失效（实际执行 %d 条）", iso[i].what, HostP_CmdCount());
+    }
+    printf("  隔离样例 %d 条\n", ni);
 
     /* ============================================================
      * 8. 上行帧：合法、以 '\n' 结尾、长度受限
