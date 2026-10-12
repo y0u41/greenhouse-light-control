@@ -908,7 +908,8 @@ bool CommandEngine::validate(const QJsonObject &cmd, QString *why)
 | `tts/enabled` | true | 播报开关 |
 | `tts/voice` | `Microsoft Huihui` | 运行时用 `availableVoices()` 校验，找不到则回退第一个 zh-CN 语音 |
 | `asr/locale` | `zh-CN` | 识别语言 |
-| `chart/maxPoints` | 300 | 曲线保留点数 |
+| `chart/maxPoints` | 300 | 曲线保留点数。**只有内存窗口**——历史数据靠 `storage/historyCsv` 落盘（见 `README.md`「历史数据落盘（CSV）」） |
+| `storage/historyCsv` | `<exe 同级>/data/history.csv` | 历史数据 CSV 路径。每个 `report` 帧 append 一行；**相对路径按 exe 目录解析**；**置空 = 关闭落盘**。写入点在 `NodeServer::handleFrame` 的 report 分支、**ACK 守卫字段过滤之前**（守卫只管界面渲染，落盘要记"收到的事实"） |
 | `node/offlineTimeoutMs` | 3000 | 静默失效判定阈值（3 × 上报周期） |
 
 ### 语音链路降级
