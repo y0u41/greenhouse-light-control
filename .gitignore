@@ -44,3 +44,6 @@ __pycache__/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# ---- 主机测试产物 ----
+tests/host/build/
