@@ -7,6 +7,7 @@
 #       没生成 CubeMX 工程也能跑（会把缺失项列出来，作为你的取数清单）。
 
 import os
+import re
 import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -52,18 +53,35 @@ def check_generated_scaffold(errors, warns):
         warns.append("未找到 startup_stm32f103xe.s（ZET6 高密度启动文件）；Keil/CLion 工程需包含它")
 
 
+def _strip_comments(txt):
+    """去掉 C 注释，只留下真正的代码。
+
+    为什么要去注释：本仓库的 esp8266.c 头注释里**故意**写了替代方案
+    `#define ESP_IRQHandler  USART2_IRQHandler`（那是可选的引脚配置说明），
+    而 it.c 的官方例程里也有一行注释掉的 `/*void PPP_IRQHandler(void) ...*/`。
+    若直接全文搜索函数名，会把注释里的字样误判成"重复定义"。
+    """
+    txt = re.sub(r"/\*.*?\*/", " ", txt, flags=re.S)   # /* 块注释 */
+    txt = re.sub(r"//[^\n]*", " ", txt)                # // 行注释
+    return txt
+
+
 def check_msp_and_it(errors, warns):
     itc = os.path.join(ROOT, "Core", "Src", "stm32f1xx_it.c")
     if os.path.isfile(itc):
         with open(itc, "r", encoding="utf-8", errors="ignore") as f:
             txt = f.read()
-        if "void USART2_IRQHandler" in txt:
-            errors.append("stm32f1xx_it.c 里重复定义了 USART2_IRQHandler；"
+        # 真正的冲突风险在 USART3：ESP8266 挂在 USART3（PB10/PB11），其
+        # `void ESP_IRQHandler(void)` 就是 `USART3_IRQHandler`（见 esp8266.c 的宏块）。
+        # 早期这里写的是 USART2 —— 那个函数本仓库根本不定义，条件**永远不可能命中**，
+        # 是一条"看着在守卫、实际什么都没守"的假守卫。
+        if "void USART3_IRQHandler" in _strip_comments(txt):
+            errors.append("stm32f1xx_it.c 里重复定义了 USART3_IRQHandler；"
                           "必须删除该行（已在 esp8266.c 定义），否则链接报 multiple definition")
         if "void SysTick_Handler" not in txt:
             warns.append("stm32f1xx_it.c 缺少 SysTick_Handler（必须保留，内部 HAL_IncTick 给 HAL_GetTick 计时）")
     else:
-        warns.append("stm32f1xx_it.c 尚未生成（CubeMX 生成后需删除其中的 USART2_IRQHandler）")
+        warns.append("stm32f1xx_it.c 尚未生成（CubeMX 生成后需删除其中的 USART3_IRQHandler）")
 
     msp = os.path.join(ROOT, "Core", "Src", "stm32f1xx_hal_msp.c")
     if os.path.isfile(msp):

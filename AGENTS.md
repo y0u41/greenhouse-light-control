@@ -267,8 +267,8 @@
 - Keil MDK：打开工程文件直接编译烧录
 - 或 CLion + arm-none-eabi-gcc：CMake 构建，ST-Link 烧录
 - 说明：固件工程结构见 Tech_Design.md 目录约定，`.ioc` 文件为 CubeMX 初始化来源
-- **集成手册（必读）**：`firmware/CUBEMX_SETUP.md` —— 业务代码已自带全部外设初始化，CubeMX **只生成时钟树 + HAL 脚手架 + 启动文件 + 空 MSP**，严禁在 CubeMX 再配 ADC3/I2C1/USART2/GPIO/IWDG 引脚（否则双初始化、抢引脚、破坏 FSMC）
-- **编译前自检**：`py firmware/prebuild_check.py` —— 检查 CubeMX 工程是否齐全、有无重复 `USART2_IRQHandler`、cJSON/LCD/wifi_config 是否到位、LCD 默认开显示未关等阻塞项
+- **集成手册（必读）**：`firmware/CUBEMX_SETUP.md` —— 业务代码已自带全部外设初始化，CubeMX **只生成时钟树 + HAL 脚手架 + 启动文件 + 空 MSP**，严禁在 CubeMX 再配 ADC3/I2C1/USART3/GPIO/IWDG 引脚（否则双初始化、抢引脚、破坏 FSMC）
+- **编译前自检**：`py firmware/prebuild_check.py` —— 检查 CubeMX 工程是否齐全、有无重复 `USART3_IRQHandler`、cJSON/LCD/wifi_config 是否到位、LCD 默认开显示未关等阻塞项
 
 ### 辅助脚本
 

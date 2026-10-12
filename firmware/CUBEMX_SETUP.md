@@ -47,7 +47,7 @@ py firmware/prebuild_check.py
    - `PCLK2` = 72 MHz（APB2 ÷1）
    - **`ADCCLK` = PCLK2 ÷6 = 12 MHz**（`RCC_ADCPCLK2_DIV6`）
    - 完成后右侧应显示：SYSCLK 72 / HCLK 72 / PCLK1 36 / PCLK2 72 / ADCCLK 12。
-5. **不要触碰**：Analog→ADC3、Connectivity→I2C1/USART2、Timers→IWDG、任何 GPIO 引脚（除 SWD）。
+5. **不要触碰**：Analog→ADC3、Connectivity→I2C1/USART3、Timers→IWDG、任何 GPIO 引脚（除 SWD）。
 6. **Project Manager → Code Generator**：
    - ☐ `Generate peripheral initialization as a pair of .c/.h files per peripheral` —— **取消勾选**（不生成多余 MX 文件）
    - ☑ `Keep User Code when re-generating`
@@ -79,7 +79,7 @@ py firmware/prebuild_check.py
 | 步骤 | 操作 | 原因 |
 | --- | --- | --- |
 | ① | **用本仓库 `Core/Src/main.c` 与 `Core/Inc/main.h` 覆盖** CubeMX 生成的同名文件 | 仓库 `main.c` 自带时钟树 + IWDG + 主循环 + 全局状态；用生成的会缺业务逻辑甚至有两个 `main()` |
-| ② | 打开 `Core/Src/stm32f1xx_it.c`，**删除其中的 `USART2_IRQHandler`**（保留 `SysTick_Handler`） | `USART2_IRQHandler` 已在 `esp8266.c` 定义，重复会 `multiple definition`。**注**：本仓库现用的 `it.c` 取自官方例程，本身就没有 `USART2_IRQHandler`，无需删；只有 CubeMX 新生成的才要检查 |
+| ② | 打开 `Core/Src/stm32f1xx_it.c`，**删除其中的 `USART3_IRQHandler`**（保留 `SysTick_Handler`） | `USART3_IRQHandler` 已在 `esp8266.c` 定义（经 `ESP_IRQHandler` 宏，`ESP_UART = USART3`），重复会 `multiple definition`。**注**：本仓库现用的 `it.c` 取自官方例程，本身就没有 `USART3_IRQHandler`，无需删；只有 CubeMX 新生成的才要检查 |
 | ③ | 打开 `Core/Src/stm32f1xx_hal_msp.c`，确认 `HAL_ADC_MspInit` / `HAL_I2C_MspInit` / `HAL_UART_MspInit` **为空**（因为第 2 步没启用这些外设，本就空；若被填了引脚代码则清空） | 与业务 `MX_*_Init` 双初始化 |
 | ④ | 拷贝 `Core/Inc/wifi_config.h.example` → `Core/Inc/wifi_config.h`，填真实 SSID / 密码 / 上位机 PC 的局域网 IP | `wifi_config.h` 不入仓；缺失时 `main.c` 用占位值，能编译但连不上网 |
 | ⑤ | `Middlewares/cJSON/` **已随仓库提供，无需另行下载**。把 `cJSON.c` 加入编译、`cJSON.h` 加入 include 路径；**不要**把 `cjson_test.c` 加入工程（它是 PC 端单元测试，含 `main()`，会与固件 `main()` 冲突）。建议把 `startup_stm32f103xe.s` 里的 `Heap_Size` 调到 `0x800` 以上（cJSON 用 `malloc`，解析单帧峰值 < 1KB） | 协议层 `protocol.c` 用 cJSON 解析 |
@@ -120,8 +120,8 @@ Drivers/CMSIS/Device/ST/STM32F1xx/Source/Templates/system_stm32f1xx.c
 
 - `Drivers/` 存在且含 `stm32f1xx_hal.c` / `system_stm32f1xx.c`；启动文件 `startup_stm32f103xe.s` 入工程。
 - HAL 已包含 **I2C 与 IWDG** 模块（`stm32f1xx_hal_i2c.c` / `stm32f1xx_hal_iwdg.c`），且 `stm32f1xx_hal_conf.h` 里 `HAL_I2C_MODULE_ENABLED` / `HAL_IWDG_MODULE_ENABLED` 为打开状态。
-- `stm32f1xx_it.c` 无 `USART2_IRQHandler` 重复定义，且保留 `SysTick_Handler`。
-- `stm32f1xx_hal_msp.c` 的 MSP 函数未配置业务主权引脚（PF8/PB6-7/PA2-3/PB8/PE5/PB5）。
+- `stm32f1xx_it.c` 无 `USART3_IRQHandler` 重复定义，且保留 `SysTick_Handler`。
+- `stm32f1xx_hal_msp.c` 的 MSP 函数未配置业务主权引脚（PF8/PB6-7/PB10-11/PB8/PE5/PB5）。
 - `Middlewares/cJSON/cJSON.c` 与 `cJSON.h` 存在并已加入编译（`cjson_test.c` 仅 PC 端验证用，勿加入固件编译）。
 - `lcd.h` 存在 **或** `LCD_SHOW_ENABLED=0`。
 - `wifi_config.h` 已创建（或至少存在 `.example`）。
@@ -151,7 +151,7 @@ Drivers/CMSIS/Device/ST/STM32F1xx/Source/Templates/system_stm32f1xx.c
 
 ## 7. 常见编译问题速查
 
-- `USART2_IRQHandler` 重复定义 → 删 `stm32f1xx_it.c` 里的同名函数（见步骤②）。
+- `USART3_IRQHandler` 重复定义 → 删 `stm32f1xx_it.c` 里的同名函数（见步骤②）。
 - `lcd.h: No such file` → 走方案 B，把 `LCD_SHOW_ENABLED` 置 0（见步骤⑥）。
 - `cJSON.h: No such file` → 步骤⑤ 未加 cJSON 或 include 路径缺失。
 - cJSON 解析异常（字段读不出 / 帧被拒）→ 上板前先在 PC 跑 `gcc cJSON.c cjson_test.c -o t && ./t` 验证子集解析正确（退出码 0 即通过）；本仓库已内置与官方兼容的子集，如需完整功能整体替换为官方 cJSON 即可。

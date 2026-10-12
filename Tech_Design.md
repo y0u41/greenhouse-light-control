@@ -37,7 +37,7 @@
 | 报警输出 | 板载有源蜂鸣器（**PB8，高电平响**）+ 执行器（**目标：外接继电器模块 PD11，渠道已确认可借用**；**先验阶段：板载 LED1 / PE5 等效负载**，见附录 A.5） |
 | 状态指示 | LED0（PB5，红）作运行心跳，**每 5 s 翻转一次**；LED1（PE5，绿）当前兼作执行器指示 |
 | 显示 | 板载 FSMC LCD 接口 + 3.5 寸 TFTLCD（NT35310，480×320，MCU 屏 16 位并口） |
-| 无线通信 | ESP8266（AT 固件），USART2（PA2/PA3），TCP 透传 |
+| 无线通信 | ESP8266（AT 固件），**USART3（PB10/PB11，板载 ATK 模块接口）**，TCP 透传 |
 | 阈值存储 | 板载 AT24C02 EEPROM（I2C1，PB6/PB7），8 字节布局含魔数与校验和 |
 | 看门狗 | IWDG，溢出周期 **≈ 6.4 s**（LSI ≈ 40 kHz ÷ 64 = 625 Hz，重装值 4000） |
 | JSON | cJSON 库（轻量 C 实现，仅编译所需模块） |
@@ -641,13 +641,13 @@ void EEPROM_Load(uint16_t *th, uint16_t *hys)
 #define RX_DISCARD_MAX 512      /* 连续无 '\n' 超过此长度即丢弃，防撑爆 */
 
 /* 串口中断只做一件事：把字节塞进环形缓冲 */
-void USART2_IRQHandler(void)
+void USART3_IRQHandler(void)
 {
-    if (LL_USART_IsActiveFlag_RXNE(USART2)) {
-        uint8_t b = LL_USART_ReceiveData8(USART2);
+    if (LL_USART_IsActiveFlag_RXNE(USART3)) {
+        uint8_t b = LL_USART_ReceiveData8(USART3);
         Ring_Push(&g_rx, b);
     }
-    HAL_UART_IRQHandler(&huart2);
+    HAL_UART_IRQHandler(&huart3);
 }
 
 /* 主循环里非阻塞地取完整帧 */
@@ -1104,8 +1104,8 @@ bool CommandEngine::validate(const QJsonObject &cmd, QString *why)
 | 报警执行器（目标） | **PD11** | GPIO 推挽输出 | 外接继电器模块，板载未接任何器件。**低电平触发优先**，见 A.3 |
 | 报警执行器（当前） | **PE5**（板载 LED1，绿） | GPIO 推挽输出 | **等效负载**：低电平点亮，与目标继电器的有效电平一致，见 A.5。依据 `led.h`：`LED1_GPIO_PIN = GPIO_PIN_5`（GPIOE）；`led.c` 中 `LED1(1)` = 关闭 |
 | LCD | FSMC 16 位并口 | PD0 / PD1 / PD4 / PD5 / PD8–PD10 / PD14 / PD15、PE7–PE15、PG0 / PG12、PB0（背光） | 3.5″ NT35310，480×320，MCU 屏。**这些脚一律不得挪用**；其中 **PD5 = FSMC_NWE**（写选通），误用会让执行器随每次刷屏高频乱跳并破坏 LCD 时序。依据 `lcd.h` 引脚宏 + IO 分配表 |
-| ESP8266 TX→MCU RX | **PA3** | USART2_RX | 与 RS485 共用，由 P5 跳线选择 |
-| ESP8266 RX←MCU TX | **PA2** | USART2_TX | 同上 |
+| ESP8266 TX→MCU RX | **PB11** | USART3_RX | 板载 **ATK 模块接口**，硬连接；模块 RX 接 PB10（见下行） |
+| ESP8266 RX←MCU TX | **PB10** | USART3_TX | 同上。依据 `esp8266.c`：`ESP_UART = USART3`、`ESP_TX_PIN = GPIO_PIN_10`（GPIOB）、`ESP_RX_PIN = GPIO_PIN_11` |
 | ESP8266 供电 | 3.3 V | — | ⚠️ 建议独立 3.3 V/1 A + 100 µF，见 A.7 |
 | 阈值存储 | **PB6 / PB7** | I2C1 SCL / SDA | 板载 AT24C02，硬件 4.7 K 上拉，硬连接**不可复用** |
 | 运行心跳 | **PB5**（板载 LED0，红） | GPIO 推挽输出 | **每 5 s 翻转一次**（5 s 亮 / 5 s 灭）；板载 LED 低电平点亮。依据 `led.h`：`LED0_GPIO_PIN = GPIO_PIN_5`（**GPIOB**） |

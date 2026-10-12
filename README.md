@@ -105,8 +105,8 @@ py firmware/prebuild_check.py          # 固件编译前自检
    `UV4.exe -b greenhouse.uvprojx -j0 -o build.log`。
 4. 详细外设配置与"引脚主权"清单见 `firmware/CUBEMX_SETUP.md`。
 
-> 若用 CubeMX 重新生成工程：**必须删掉 `Core/Src/stm32f1xx_it.c` 里的 `USART2_IRQHandler`**
-> （已在 `esp8266.c` 定义），且不要让 CubeMX 重复初始化 PF8 / PB6-PB7 / PA2-PA3 / PB8 / PE5 / PB5。
+> 若用 CubeMX 重新生成工程：**必须删掉 `Core/Src/stm32f1xx_it.c` 里的 `USART3_IRQHandler`**
+> （已在 `esp8266.c` 定义），且不要让 CubeMX 重复初始化 PF8 / PB6-PB7 / PB10-PB11 / PB8 / PE5 / PB5。
 > `firmware/prebuild_check.py` 会守卫这两条。
 
 ### 3. Qt 上位机
