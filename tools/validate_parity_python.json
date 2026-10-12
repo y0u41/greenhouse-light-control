@@ -1,0 +1,278 @@
+{
+  "_comment": [
+    "由 tools/check_validate_parity.py --write 生成，请勿手改。",
+    "record 是 protocol_schema.validate_cmd 对 tools/validate_cases.json 的真实判定，",
+    "qtapp/tests/test_commandengine.cpp 会读它并与 C++ CommandEngine::validate 逐条比对。"
+  ],
+  "adc_max": 4095,
+  "case_count": 33,
+  "cases_source": "validate_cases.json",
+  "format": 1,
+  "hys_default": 150,
+  "records": [
+    {
+      "actual": false,
+      "expect": false,
+      "id": "action_missing",
+      "note": "action 缺失 -> toString() 为空 -> “缺少 action 字段”",
+      "rule": "cpp:37-42",
+      "why": "缺少 action 字段"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "action_empty_string",
+      "note": "action 为空字符串 -> 同缺失分支",
+      "rule": "cpp:37-42",
+      "why": "未知动作："
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "action_null",
+      "note": "action 为 null -> toString() 为空",
+      "rule": "cpp:37-42",
+      "why": "缺少 action 字段"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "action_unknown_nope",
+      "note": "未知动作 -> isValidAction 拒绝",
+      "rule": "cpp:43-48",
+      "why": "未知动作：nope"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "action_unknown_query",
+      "note": "历史误写 query 必须被拒绝（防 get_state/query 漂移）",
+      "rule": "cpp:43-48",
+      "why": "未知动作：query"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "action_unknown_case_sensitive",
+      "note": "动作名大小写敏感",
+      "rule": "cpp:43-48",
+      "why": "未知动作：Relay_On"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "action_non_string_number",
+      "note": "★ 已确认分叉：action 是非字符串。C++ QJsonValue::toString() 得空串 -> 走分支 1（\"缺少 action 字段\"）；Python str(1) 非空 -> 走分支 2（\"未知动作：1\"）。判定同为 false，why 文本不同",
+      "rule": "cpp:43-48",
+      "why": "未知动作：1"
+    },
+    {
+      "actual": true,
+      "expect": true,
+      "id": "action_known_relay_on",
+      "note": "6 个合法动作之一，无需参数",
+      "rule": "cpp:80",
+      "why": "ok"
+    },
+    {
+      "actual": true,
+      "expect": true,
+      "id": "action_known_relay_off",
+      "note": "6 个合法动作之一",
+      "rule": "cpp:80",
+      "why": "ok"
+    },
+    {
+      "actual": true,
+      "expect": true,
+      "id": "action_known_auto",
+      "note": "6 个合法动作之一",
+      "rule": "cpp:80",
+      "why": "ok"
+    },
+    {
+      "actual": true,
+      "expect": true,
+      "id": "action_known_get_state",
+      "note": "6 个合法动作之一",
+      "rule": "cpp:80",
+      "why": "ok"
+    },
+    {
+      "actual": true,
+      "expect": true,
+      "id": "action_known_alarm_test",
+      "note": "6 个合法动作之一",
+      "rule": "cpp:80",
+      "why": "ok"
+    },
+    {
+      "actual": true,
+      "expect": true,
+      "id": "set_th_known_with_valid_value",
+      "note": "6 个合法动作之一（set_th 走完整校验后放行）",
+      "rule": "cpp:77",
+      "why": "ok"
+    },
+    {
+      "actual": true,
+      "expect": true,
+      "id": "other_actions_ignore_value",
+      "note": "非 set_th 动作即使带越界 value 也不校验 value",
+      "rule": "cpp:80",
+      "why": "ok"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "set_th_hys150_missing_value",
+      "note": "不含 value 字段 -> false",
+      "rule": "cpp:51-56",
+      "why": "set_th 缺少数值参数 value"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "set_th_hys150_value_null",
+      "note": "value 为 null -> isDouble() 为假",
+      "rule": "cpp:58-63",
+      "why": "set_th 的 value 不是数字"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "set_th_hys150_value_string",
+      "note": "value 是字符串 -> isDouble() 为假（不做隐式转换）",
+      "rule": "cpp:58-63",
+      "why": "set_th 的 value 不是数字"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "set_th_hys150_value_bool",
+      "note": "value 是布尔 -> 不是数字",
+      "rule": "cpp:58-63",
+      "why": "set_th 的 value 不是数字"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "set_th_hys150_value_negative",
+      "note": "n < 0 越下界",
+      "rule": "cpp:65-70",
+      "why": "阈值 -1 超出量程 0-4095"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "set_th_hys150_value_zero",
+      "note": "n 在量程内但 n <= hys",
+      "rule": "cpp:71-76",
+      "why": "阈值 0 必须大于回差 150"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "set_th_hys150_value_at_hys",
+      "note": "边界：n == hys 必须为 false（要求严格大于）",
+      "rule": "cpp:71-76",
+      "why": "阈值 150 必须大于回差 150"
+    },
+    {
+      "actual": true,
+      "expect": true,
+      "id": "set_th_hys150_value_hys_plus_1",
+      "note": "边界：n == hys + 1 必须为 true",
+      "rule": "cpp:77",
+      "why": "ok"
+    },
+    {
+      "actual": true,
+      "expect": true,
+      "id": "set_th_hys150_value_adc_max",
+      "note": "边界：n == Proto::ADC_MAX 上界内",
+      "rule": "cpp:77",
+      "why": "ok"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "set_th_hys150_value_adc_max_plus_1",
+      "note": "边界：n == ADC_MAX + 1 越上界",
+      "rule": "cpp:65-70",
+      "why": "阈值 4096 超出量程 0-4095"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "set_th_hys150_value_huge",
+      "note": "远超量程",
+      "rule": "cpp:65-70",
+      "why": "阈值 99999 超出量程 0-4095"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "set_th_hys0_value0",
+      "note": "hys=0 边界：n == 0 == hys -> false",
+      "rule": "cpp:71-76",
+      "why": "阈值 0 必须大于回差 0"
+    },
+    {
+      "actual": true,
+      "expect": true,
+      "id": "set_th_hys0_value1",
+      "note": "hys=0 边界：n == 1 -> true",
+      "rule": "cpp:77",
+      "why": "ok"
+    },
+    {
+      "actual": true,
+      "expect": true,
+      "id": "set_th_hys0_value4095",
+      "note": "hys=0 时上界不变",
+      "rule": "cpp:77",
+      "why": "ok"
+    },
+    {
+      "actual": true,
+      "expect": true,
+      "id": "set_th_hys_negative_value_equals_hys",
+      "note": "hys 为负（异常输入）：0 > -5 放行；两侧都应如此",
+      "rule": "cpp:77",
+      "why": "ok"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "set_th_hys4095_value4095",
+      "note": "hys 顶到 ADC_MAX 后无合法阈值 -> false",
+      "rule": "cpp:71-76",
+      "why": "阈值 4095 必须大于回差 4095"
+    },
+    {
+      "actual": true,
+      "expect": false,
+      "id": "set_th_value_float_noninteger_rejected",
+      "note": "★ 已确认 C++ 侧行为：commandengine.cpp:64 的 v.toInt() 对非整数 double 返回 0（Qt 的 toInt 不做 double->int 转换），因此 2000.9 被当成 0 -> 0 <= hys -> false，why 为“阈值 0 必须大于回差 150”。Python 侧 int(2000.9)=2000 -> true。这是真实判定分叉",
+      "rule": "cpp:64-76",
+      "why": "ok"
+    },
+    {
+      "actual": false,
+      "expect": false,
+      "id": "set_th_value_float_at_hys_rejected",
+      "note": "150.9 同样被 toInt() 归零 -> C++ 判 false；Python 截断为 150 -> 也 false，判定相同但 why 文本不同",
+      "rule": "cpp:64-76",
+      "why": "阈值 150 必须大于回差 150"
+    },
+    {
+      "actual": true,
+      "expect": true,
+      "id": "set_th_value_float_negative_truncates",
+      "note": "-0.5 被 toInt() 归零、Python int(-0.5) 也得 0；hys=-10 时 0 > -10，两侧判定同为 true",
+      "rule": "cpp:77",
+      "why": "ok"
+    }
+  ]
+}
