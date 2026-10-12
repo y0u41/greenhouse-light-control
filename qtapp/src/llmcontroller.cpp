@@ -98,6 +98,8 @@ void LlmController::onModelsReady(const QStringList &models)
                                  m_cfg.llmToken(), m_cfg.llmTimeoutMs());
             }, Qt::QueuedConnection);
         }
+        /* 对话区的提示文案留在 MainWindow（UI 的事）；这里只报"从谁换到谁" */
+        emit modelSwitched(configured, models.first());
     }
     emit modelsChanged(models);
 }

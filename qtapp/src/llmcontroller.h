@@ -56,6 +56,9 @@ signals:
      * "配置模型不在列表则切换"的修正已在本控制器内完成。 */
     void modelsChanged(const QStringList &models);
 
+    /* 已把配置模型切换为服务端列表里的模型（文案在 UI 侧） */
+    void modelSwitched(const QString &from, const QString &to);
+
 private:
     void startThread();
     void probe();

@@ -182,6 +182,7 @@ void MainWindow::wireSignals()
     connect(m_llmCtl, &LlmController::llmFinished, this, &MainWindow::onLlmFinished);
     connect(m_llmCtl, &LlmController::llmFailed, this, &MainWindow::onLlmFailed);
     connect(m_llmCtl, &LlmController::modelsChanged, this, &MainWindow::onModelsReady);
+    connect(m_llmCtl, &LlmController::modelSwitched, this, &MainWindow::onModelSwitched);
     connect(m_llmCtl, &LlmController::llmAvailabilityChanged,
             this, &MainWindow::onLlmAvailabilityChanged);
 }
@@ -455,6 +456,12 @@ void MainWindow::onModelsReady(const QStringList &models)
         appendChat(tr("系统"), tr("未获取到模型列表，请确认 llama-server 已启动"));
     }
     /* "配置的模型不在服务端列表中 → 切换并重新 configure" 已由 LlmController 处理 */
+}
+
+void MainWindow::onModelSwitched(const QString &from, const QString &to)
+{
+    appendChat(tr("系统"),
+               tr("配置的模型 %1 不在服务端列表中，已切换为 %2").arg(from, to));
 }
 
 void MainWindow::onAsrText(const QString &text)

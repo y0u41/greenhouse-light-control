@@ -50,6 +50,7 @@ private slots:
     void onLlmFinished(const QString &content);
     void onLlmFailed(const QString &reason);
     void onModelsReady(const QStringList &models);
+    void onModelSwitched(const QString &from, const QString &to);
     void onLlmAvailabilityChanged(bool ok);
     void onAsrText(const QString &text);
     void onAsrFailed(const QString &reason);
