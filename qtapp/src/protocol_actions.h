@@ -6,6 +6,7 @@
 // 并补 tools/contract_test.py 用例（get_state 是合法动作，query 不是）。
 
 #include <QString>
+#include <QStringList>
 
 namespace Proto {
 
@@ -16,6 +17,41 @@ constexpr char ACTION_AUTO[]      = "auto";
 constexpr char ACTION_SET_TH[]    = "set_th";
 constexpr char ACTION_GET_STATE[] = "get_state";
 constexpr char ACTION_ALARM_TEST[] = "alarm_test";   // 报警测试：蜂鸣器脉冲 1 s，不改模式
+
+// ★ 允许动作的全集，**唯一的数组式清单** ★
+//
+// 为什么要有一个数组：System Prompt 必须把"合法动作白名单"逐字列给模型
+// （实测：不列全时模型会自造 set_threshold / threshold 之类的名字，而
+// CommandEngine::validate 会把这些判为"未知动作"直接拒收，表现为"用户按了没反应"）。
+// 若在白名单处再手抄一份动作名，就出现第二事实源、必然漂移 —— 故此处统一
+// 从 ACTION_* 常量取，Tools/consistency_check.py 也按同样的数组写法解析本文件。
+inline const char *const *allActions(int *count)
+{
+    static const char *const ALL[] = {
+        ACTION_RELAY_ON,
+        ACTION_RELAY_OFF,
+        ACTION_AUTO,
+        ACTION_SET_TH,
+        ACTION_GET_STATE,
+        ACTION_ALARM_TEST,
+    };
+    if (count != nullptr) {
+        *count = static_cast<int>(sizeof(ALL) / sizeof(ALL[0]));
+    }
+    return ALL;
+}
+
+inline QStringList allActionNames()
+{
+    int n = 0;
+    const char *const *a = allActions(&n);
+    QStringList out;
+    out.reserve(n);
+    for (int i = 0; i < n; ++i) {
+        out.append(QLatin1String(a[i]));
+    }
+    return out;
+}
 
 // 上行 type
 constexpr char TYPE_REPORT[] = "report";
@@ -46,6 +82,25 @@ inline bool isValidAction(const QString &a)
         || a == QLatin1String(ACTION_SET_TH)
         || a == QLatin1String(ACTION_GET_STATE)
         || a == QLatin1String(ACTION_ALARM_TEST);
+}
+
+// 动作的中文含义 + 输出形状，供 System Prompt 生成白名单条目（llmclient.cpp 消费）。
+// 与 isValidAction 同源：这里的每一条都必须对应 ACTION_* 之一，顺序也一致。
+inline QString actionLine(int index)
+{
+    static const char *const LINES[] = {
+        "  用 {\"action\":\"relay_on\"}   手动吸合继电器（副作用：切到手动模式）",
+        "  用 {\"action\":\"relay_off\"}  手动释放继电器（副作用：切到手动模式）",
+        "  用 {\"action\":\"auto\"}        切回自动模式",
+        "  用 {\"action\":\"set_th\",\"value\":N}  把光强阈值设为 N（必须同时给 value）",
+        "  用 {\"action\":\"get_state\"}   查询当前状态",
+        "  用 {\"action\":\"alarm_test\"}  报警测试（蜂鸣器响 1 秒，不改模式）",
+    };
+    const int n = static_cast<int>(sizeof(LINES) / sizeof(LINES[0]));
+    if (index < 0 || index >= n) {
+        return QString();
+    }
+    return QString::fromUtf8(LINES[index]);
 }
 
 } // namespace Proto

@@ -85,6 +85,8 @@ tools/
 ├─ consistency_check.py       跨层一致性守护（固件 ↔ Qt ↔ 契约 ↔ 文档）
 ├─ simulate_node.py           虚拟节点（多点位演示 / 协议自测）
 ├─ hil_probe.py               硬件在环验证探针（代替 Qt 当 TCP 服务端，核对协议不变式）
+├─ probe.py                   上板 SWD 探针（板子无响应时读 uwTick/寄存器/故障栈帧取证，
+│                             不依赖网络；与 hil_probe.py 分属芯片级 / 协议级，互补不重复）
 ├─ package_submission.py      交付打包（git archive + 密钥结构性排除，包后自校验）
 ├─ make_keil_project.py       由模板生成 greenhouse.uvprojx（含引用校验）
 ├─ build.ps1                  一键构建与自检（含中文路径规避）
@@ -198,6 +200,23 @@ py tools\hil_probe.py --port 9092 --duration 24
 
 > ⚠ **不可与 Qt 上位机同时运行**（两者都绑 9092）；端口须与固件 `wifi_config.h` 的
 > `TCP_SERVER_PORT` 一致。
+
+### 板子无响应时的 SWD 取证（不依赖网络）
+
+`hil_probe.py` 要求固件已跑起来且 WiFi 连上；板子卡死/复位循环/HardFault 时它完全够不着，
+此时改用 ST-Link 直读芯片内存的 `probe.py`：
+
+```powershell
+py tools\probe.py --check                    # 采样 uwTick，判定是否在复位循环
+py tools\probe.py --read g_adc g_th g_light  # 按符号名读全局变量（需 .axf 在 Output/）
+py tools\probe.py --core                     # 读 PC/SP/LR/XPSR，看卡在哪
+py tools\probe.py --fault                    # 读 CFSR/HFSR + 异常栈帧，定位 HardFault
+```
+
+> 两者分工：`probe.py` = 芯片级（SWD，需要 ST-Link，断网可用）；`hil_probe.py` = 协议级
+> （TCP，需要节点在线）。互为补集，都要保留。
+> `probe.py` 用严格正则只认 `0xAAAAAAAA : WWWWWWWW` 数据行，避免把 "ST-LINK SN" 之类误当读数
+> （起因与教训见 `docs/lessons.md`）。
 
 ### 历史数据落盘（CSV）
 

@@ -34,32 +34,89 @@ QString LlmClient::buildSystemPrompt(const QString &stateJson) const
     //   ② 示例语义与固件 light > th 判断一致："光太强 → relay_on（遮阳）"，
     //      不要写成"太暗了开灯"；
     //   ③ relay_on/relay_off 会切入手动模式，需在提示中说明。
+    //
+    // ★ 本次加强（实测驱动，2026-10-12）★
+    // 基线实测：同一 prompt 下 glm-4.7-flash 会在两种情况下不守协议词汇 ——
+    //   A. 白名单只是罗列、没有"只能从里面选、不得造名字"的硬约束时，
+    //      模型会输出 set_threshold / threshold 这类自造名；
+    //   B. enable_thinking 未被关掉（content 为空、回落 reasoning_content）时，
+    //      512 token 预算被"先分析再输出"的推理吃满，content 截断在分析中途，
+    //      MainWindow 取首 { 到末 } 解析失败 —— 表现为"按了没反应"。
+    // 故此处：动作白名单**由 Proto:: 常量生成**（避免第二处硬编码），
+    // 并显式禁止自造名 + 禁止任何前置叙述 + 补 set_th 的 value 字段名与量程。
+    // 注意：temperature 0.1 / max_tokens 512 / enable_thinking=false 保持不变
+    //（见 ask()，三者的实测依据写在那边，别在这里改）。
+
+    // 白名单逐条由 Proto 的动作清单生成：Protocol_actions.h 是动作名的唯一事实源，
+    // 这里不出现任何手抄的动作名字面量。
+    const QStringList names = Proto::allActionNames();
+    QStringList whitelist;
+    for (int i = 0; i < names.size(); ++i) {
+        whitelist.append(QStringLiteral("  %1  %2").arg(names.at(i), Proto::actionLine(i)));
+    }
+    const QString nameList = names.join(QStringLiteral(" / "));
+
     return QStringLiteral(
-        "你是智能温室控制助手。根据用户指令，只输出 JSON，不要输出任何其他文字，不要解释。\n"
+        "你是智能温室感光控制系统的指令解析器。"
+        "把你的输出当作机器可执行的指令帧，而不是回答。\n"
         "\n"
-        "继电器语义：光照过强时吸合继电器遮阳/报警，光照恢复正常后释放。\n"
-        "relay_on / relay_off 会切换到手动模式，auto 才切回自动模式。\n"
+        "【输出格式·硬性】\n"
+        "只输出一个 JSON 对象，对象里必须有 action 字段。\n"
+        "禁止输出任何前置叙述，例如\"分析\"\"步骤如下\"\"首先\"\"1.\"；"
+        "这种内容一旦出现，整条指令就作废。\n"
+        "禁止 markdown 代码围栏（不要 ```）、禁止注释、禁止解释、禁止说客套话。\n"
+        "第一个字符必须是 {，最后一个字符必须是 }。\n"
         "\n"
-        "可用动作：\n"
-        "  {\"action\":\"relay_on\"}            手动吸合继电器（进入手动模式）\n"
-        "  {\"action\":\"relay_off\"}           手动释放继电器（进入手动模式）\n"
-        "  {\"action\":\"auto\"}                切回自动模式\n"
-        "  {\"action\":\"set_th\",\"value\":N}   将光强阈值设为 N（0-4095，且必须大于当前回差）\n"
-        "  {\"action\":\"alarm_test\"}          报警测试（蜂鸣器响 1 秒，不改模式）\n"
-        "  {\"action\":\"get_state\"}           查询当前状态\n"
+        "【合法动作白名单·只能从这里选】\n"
+        "action 的取值只允许这 %1 个字符串，必须逐字符完全一致：\n"
+        "%2\n"
+        "%3\n"
         "\n"
-        "当前状态：%1\n"
+        "★ 只能输出上面这些动作名，不得自造新名字 ★\n"
+        "严禁翻译、缩写、加后缀或改写动作名。以下写法一律非法：\n"
+        "  set_threshold（应为 set_th）、threshold、setThreshold、"
+        "open_relay、close_relay、switch_auto、manual、query、status、test_alarm。\n"
         "\n"
-        "示例：\n"
+        "【口语 → 动作 对应】\n"
+        "  打开/吸合/合上继电器、放下遮阳帘 → action 必须是 relay_on\n"
+        "  关闭/断开/释放继电器、收起遮阳帘 → action 必须是 relay_off\n"
+        "  自动模式/恢复自动          → action 必须是 auto\n"
+        "  阈值/门槛/阈值改/阈值设 + 数字 → action 必须是 set_th，并给出 value\n"
+        "  状态/怎么样/现在多少/查一下   → action 必须是 get_state\n"
+        "  测试报警/蜂鸣器响一下/试一下报警 → action 必须是 alarm_test\n"
+        "  切手动（只说切手动、没说吸合还是释放）→ action 必须是 get_state，"
+        "因为协议里没有单独的\"切手动\"动作，不要猜。\n"
+        "\n"
+        "【set_th 的参数】\n"
+        "  字段名固定为 value（不是 threshold、不是 num、不是 val），类型为整数。\n"
+        "  取值范围 0 < value <= 4095，且必须大于当前回差 hys。\n"
+        "  例：把阈值调到 2500 → {\"action\":\"set_th\",\"value\":2500}\n"
+        "\n"
+        "【继电器语义】\n"
+        "光照过强时吸合继电器遮阳/报警，光照恢复正常后释放。\n"
+        "relay_on / relay_off 会切到手动模式，只有 auto 能切回自动模式。\n"
+        "\n"
+        "当前状态：%4\n"
+        "\n"
+        "【正例·照这样输出】\n"
         "用户：光太强了，把遮阳帘放下来\n"
         "助手：{\"action\":\"relay_on\"}\n"
-        "\n"
         "用户：把阈值调到 2500\n"
         "助手：{\"action\":\"set_th\",\"value\":2500}\n"
-        "\n"
         "用户：现在光照多少\n"
-        "助手：{\"action\":\"get_state\"}"
-    ).arg(stateJson);
+        "助手：{\"action\":\"get_state\"}\n"
+        "用户：测试一下报警\n"
+        "助手：{\"action\":\"alarm_test\"}\n"
+        "\n"
+        "【错误示范·绝不要这样】\n"
+        "用户：把阈值调到 2500\n"
+        "错误：{\"action\":\"set_threshold\",\"parameter\":2500}  ← 动作名和字段名都错了\n"
+        "错误：{\"threshold\":2500}  ← 没有 action 字段\n"
+        "错误：我先分析一下用户意图……  ← 任何前置叙述都作废\n"
+        "正确：{\"action\":\"set_th\",\"value\":2500}\n"
+        "\n"
+        "现在直接给出那一个 JSON 对象（第一个字符就是 {）："
+    ).arg(QString::number(names.size()), whitelist.join(QLatin1Char('\n')), nameList, stateJson);
 }
 
 void LlmClient::ask(const QString &userText, const QString &stateJson)
