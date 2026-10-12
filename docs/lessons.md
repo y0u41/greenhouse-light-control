@@ -1,15 +1,14 @@
 # 固件踩坑全记录（lessons）
 
-> **本文件与 [`AGENTS.md`](../AGENTS.md) 的「已知陷阱」是什么关系？**
+> **本文件与 [`AGENTS.md`](../AGENTS.md) 是什么关系？**
 >
-> - [`AGENTS.md`](../AGENTS.md)「已知陷阱」是**速查条目**：一句话讲清"结论 + 禁令"，
->   给"改代码前必读"用，篇幅有限、不写过程。
-> - **本文件是完整来龙去脉**：现象 → 观测证据 → 根因 → 修法 → 复现方法。
->   给"想弄明白为什么"和"下次同类问题怎么定位"用。
-> - 两者**刻意不重复**：AGENTS.md 里已编号的 27 条只在这里给出行号引用，
->   不再复述其内容。本文件收录的是那些"长到塞不进速查表、但删了就再也查不到"的经历。
->
-> 涉及固件时，两个文件配套读：先看 AGENTS.md 得结论，需要证据与复现方法时翻到这里。
+> - [`AGENTS.md`](../AGENTS.md) 是**入口文件**：只讲规则红线、文档地图，以及"动手前必读"的
+>   3~6 条最危险的坑。它**不承载踩坑细节**（篇幅有限，写长了就没人读完）。
+> - **本文件是全部踩坑的唯一详版**：现象 → 观测证据 → 根因 → 修法 → 复现方法。
+> - 原 `AGENTS.md`「已知陷阱」速查表（常规 1–13 条 + 连续 1–27 条）**已整体并入本文件**，
+>   不再有两份。旧交叉引用（如 `firmware/CUBEMX_SETUP.md` 的"已知陷阱 #3"、
+>   `Tech_Design.md` 的"第 8 条"）请按下文的**编号对照表**换算到锚点。
+> - `main.c` / `main.h` 的注释按 `docs/lessons.md#<锚点>` 指到这里；**锚点名不可随意改名**。
 
 各节锚点（`main.c` 的注释按这些锚点指向本文件）：
 
@@ -23,6 +22,64 @@
 | [`#boot-order`](#boot-order) | 启动顺序：保持最朴素的三步 |
 | [`#boot-progress`](#boot-progress) | 启动进度闪灯码（已删除，附恢复方法） |
 | [`#lcd`](#lcd) | LCD 面板识别与"黑屏 ↔ 白屏"闪 |
+| [`#light-sensor`](#light-sensor) | 光敏是 PF8/ADC3_IN6（官方 readme 误写 PA1）与 `light = 4095 - adc` |
+| [`#actuator`](#actuator) | 执行器引脚主权（PD11 / FSMC 占用脚）、`ACTUATOR_*` 抽象与两阶段 |
+| [`#ports`](#ports) | 端口纪律：llama-server 8092 与 Qt NodeServer 9092 必须错开 |
+| [`#beep-led`](#beep-led) | 蜂鸣器 PB8 高电平响；LED0/LED1 语义分工 |
+| [`#tts`](#tts) | TTS 语音名（无 `Microsoft Xiaoxiao`）与 TextToSpeech 模块缺失 |
+| [`#ascii-path`](#ascii-path) | 源码路径含中文导致 Qt AutoMoc 失败 |
+| [`#keil-project`](#keil-project) | Keil 工程由脚本生成（uvoptx 调试器 / 模板缺 HAL 文件） |
+| [`#bom`](#bom) | 含中文的 `.ps1` 必须保持 UTF-8 **with BOM** |
+| [`#esp8266-at`](#esp8266-at) | ESP8266 AT 时序四坑（异步 CIPSTART / CIPMODE 顺序 / 重烧不复位 / `+++`） |
+| [`#toolchain-hygiene`](#toolchain-hygiene) | 工具链卫生：烧录与调试的替代路径、AC6 隐式声明、DTR/RTS、`DEBUG_UART` |
+| [`#code-invariants`](#code-invariants) | 代码不变式：失败不致命、单一事实源、行装配器复位、cJSON 堆预算 |
+| [`#attic`](#attic) | 工程卫生地雷：`_attic/`、`lcd_ex.c`、`_template_*.uvoptx` |
+
+---
+
+## 原「AGENTS.md 已知陷阱」编号对照
+
+`AGENTS.md` 收缩为入口文件后，「已知陷阱」速查表已并入本文件。原编号保留了**两套**
+（这是历史遗留的不一致，本次一并说明）：开头「常规」表编号 **1–13**，随后
+「上板调试 / 架构约束 / 工程卫生」是**连续编号 1–27**（上板 1–16、架构 17–23、卫生 24–27）。
+
+| 原编号 | 主题 | 现锚点 |
+| --- | --- | --- |
+| 常规 #1 | 光敏是 PF8 = ADC3_IN6，不是 PA1（官方 readme 笔误） | [`#light-sensor`](#light-sensor) |
+| 常规 #2 | 光照越强 `adc` 越小；`light = 4095 - adc`；不要用 `lsens_get_val()` | [`#light-sensor`](#light-sensor) |
+| 常规 #3 | 执行器 PD11 不得放 PD5；FSMC 占用脚；两阶段；`ACTUATOR_*` 抽象 | [`#actuator`](#actuator) |
+| 常规 #4 | Qt 监听 9092 / llama-server 8092 必须错开 | [`#ports`](#ports) |
+| 常规 #5 | 蜂鸣器 PB8 高电平响 | [`#beep-led`](#beep-led) |
+| 常规 #6 | TTS 语音名易错 + TextToSpeech 模块未装 | [`#tts`](#tts) |
+| 常规 #7 | LED0 = 心跳 / LED1 = 执行器指示，不得混用 | [`#beep-led`](#beep-led) |
+| 常规 #8 | 源码路径含中文会让 Qt moc 失败 | [`#ascii-path`](#ascii-path) |
+| 常规 #9 | Keil 工程不要手改，用脚本生成 | [`#keil-project`](#keil-project) |
+| 常规 #10 | `tools/build.ps1` 必须保持 UTF-8 with BOM | [`#bom`](#bom) |
+| 常规 #11 | 只给 `.uvprojx` 会导致烧录失败（调试器在 `.uvoptx`） | [`#keil-project`](#keil-project) |
+| 常规 #12 | 未关闭半主机（semihosting）会死在 `main()` 之前 | [`#semihosting`](#semihosting) |
+| 常规 #13 | IWDG 必须在全部开机耗时步骤之后才启动 | [`#iwdg-start-late`](#iwdg-start-late) |
+| 连续 #1 | 半主机（同上） | [`#semihosting`](#semihosting) |
+| 连续 #2 | `IWDG_RLR` 只有 12 位，重装值永远 ≤ 4095 | [`#iwdg-reload-12bit`](#iwdg-reload-12bit) |
+| 连续 #3 | F1 的 IWDG 一旦启动，系统复位不清除 | [`#iwdg-survives-reset`](#iwdg-survives-reset) |
+| 连续 #4 | 写完 `IWDG_PR/RLR` 必须轮询 `IWDG_SR`，不要裸寄存器直写 | [`#iwdg-sr-poll`](#iwdg-sr-poll) |
+| 连续 #5 | `HAL_IWDG_Refresh()` 空句柄会写地址 0 | [`#iwdg-refresh-null`](#iwdg-refresh-null) |
+| 连续 #6–#9 | ESP8266 AT 时序四坑 | [`#esp8266-at`](#esp8266-at) |
+| 连续 #10–#12 | ST-Link `hotplug` 复位目标 / pwsh 别名吞命令 / 2 字节对齐读错 | [`#debug-only-once`](#debug-only-once) |
+| 连续 #13 | AC6 把隐式函数声明当错误 | [`#toolchain-hygiene`](#toolchain-hygiene) |
+| 连续 #14 | 串口工具 DTR/RTS 组合会按住复位 | [`#toolchain-hygiene`](#toolchain-hygiene) |
+| 连续 #15 | `DEBUG_UART=0` 时串口一个字节都没有 | [`#toolchain-hygiene`](#toolchain-hygiene) |
+| 连续 #16 | 复位原因取证：`RCC->CSR` 粘滞标志 | [`#reset-forensics`](#reset-forensics) |
+| 连续 #17 | 业务模块一律返回状态码，绝不调 `Error_Handler()` | [`#code-invariants`](#code-invariants) |
+| 连续 #18 | 采样失败不能与"极值"共用返回值 | [`#code-invariants`](#code-invariants) |
+| 连续 #19 | 断链/重连必须复位协议层行装配器 | [`#code-invariants`](#code-invariants) |
+| 连续 #20 | cJSON 是 malloc 型解析器，堆预算必须留足 | [`#code-invariants`](#code-invariants) |
+| 连续 #21 | `IT` 侧 relay 与 buzz 已解耦 | [`#code-invariants`](#code-invariants) |
+| 连续 #22 | 配置宏的单一事实源 | [`#code-invariants`](#code-invariants) |
+| 连续 #23 | `#if DEBUG_UART` 不要写成 `#ifdef` | [`#code-invariants`](#code-invariants) |
+| 连续 #24 | 地雷文件已移出 `firmware/` 树到 `_attic/` | [`#attic`](#attic) |
+| 连续 #25 | `Drivers/BSP/LCD/lcd_ex.c` 绝不能加入工程 | [`#attic`](#attic) |
+| 连续 #26 | `lcd.c/h`、`lcd_ex.c`、`lcdfont.h` 逐字节相同且是 GBK | [`#lcd`](#lcd) |
+| 连续 #27 | `_template_atk_f103.uvoptx` 不要删 | [`#keil-project`](#keil-project) |
 
 ---
 
@@ -57,14 +114,14 @@ arm-none-eabi-objdump -d firmware/Output/greenhouse.axf | findstr bkpt   # 必�
 去否定这个原因** —— 当时正是因为这个误判，把问题错误地归因成了"板载串口在硬件层面
 不通"，白绕了很久。**这个结论是误诊，不要再重复。**
 
-（AGENTS.md「已知陷阱」#12 是速查版。）
-
 ## iwdg
 
 IWDG 是本项目**最容易做出"板子毫无反应"**的外设，下面 6 条是实测踩出来的，
 顺序按"配置一只正确的狗"的操作次序排。
 
 ### iwdg-reload-12bit —— 重装值必须 ≤ 4095
+
+<a id="iwdg-reload-12bit"></a>
 
 `IWDG_RLR` 只有 **12 位**（`RL[11:0]`，RM0008 §18.4.3）。
 
@@ -84,9 +141,9 @@ IWDG 是本项目**最容易做出"板子毫无反应"**的外设，下面 6 条
 **修法**：`Reload = 4000U` → `4000 × 64 / 40000 = **6.4 s**`，对
 "开狗到主循环首次喂狗 ≈ 1.2 s"有 5× 余量。**永远不要超过 4095。**
 
-（AGENTS.md「已知陷阱」#2 是速查版。）
-
 ### iwdg-survives-reset —— 启动后系统复位不清它
+
+<a id="iwdg-survives-reset"></a>
 
 **STM32F1 的 IWDG 一旦启动，系统复位（含按键复位、`NVIC_SystemReset`）不会清除它**
 （只有上电复位 POR 会）。所以配置错了就是**永久复位循环**，每一轮沿用同一份错配置 ——
@@ -94,9 +151,9 @@ IWDG 是本项目**最容易做出"板子毫无反应"**的外设，下面 6 条
 
 **操作含义**：**改狗参数（PR / RLR）后必须整板断电重新上电再验证**，光按复位键不算验证。
 
-（AGENTS.md「已知陷阱」#3 是速查版。）
-
 ### iwdg-sr-poll —— 写完 PR/RLR 必须轮询 IWDG_SR
+
+<a id="iwdg-sr-poll"></a>
 
 `IWDG_PR` / `IWDG_RLR` 写入后先进入**影子寄存器**，必须等 `IWDG_SR` 的
 `PVU` / `RVU` 位清零才真正生效；**`PVU` / `RVU` 未清时的写入被直接忽略**。
@@ -127,9 +184,9 @@ KR=0xCCCC -> KR=0x5555 -> 写 PR/RLR -> 轮询 IWDG_SR 直到为 0 -> KR=0xAAAA
 > （1.45 s），只是因为它把 `iwdg_start()` 紧贴 `while(1)`、其后没有任何耗时动作，
 > 侥幸没暴露。**不要照抄成功案例里的可疑写法。**
 
-（AGENTS.md「已知陷阱」#4 是速查版。）
-
 ### iwdg-refresh-null —— 喂狗用裸写，不要用 HAL_IWDG_Refresh
+
+<a id="iwdg-refresh-null"></a>
 
 **踩坑记录**：`HAL_IWDG_Refresh(&s_hiwdg)` 在 `s_hiwdg.Instance == NULL` 时会写地址 0。
 展开后就是：
@@ -143,9 +200,9 @@ WRITE_REG(hiwdg->Instance->KR, 0xAAAA)   /* Instance == NULL -> 往 0x00000000 �
 
 **修法**：喂狗用裸写 `IWDG->KR = 0xAAAAU;`（不依赖句柄）。参考工程同样用裸写。
 
-（AGENTS.md「已知陷阱」#5 是速查版。）
-
 ### iwdg-dbgmcu-freeze —— 调试时冻结看门狗
+
+<a id="iwdg-dbgmcu-freeze"></a>
 
 `DBGMCU->CR |= DBGMCU_CR_DBG_IWDG_STOP`（照抄参考工程 `User/App/app_main.c:132`）
 让**调试器暂停 CPU 时冻结看门狗**。
@@ -157,6 +214,8 @@ WRITE_REG(hiwdg->Instance->KR, 0xAAAA)   /* Instance == NULL -> 往 0x00000000 �
 `#ifndef DBGMCU_CR_DBG_IWDG_STOP / #define 0x00000100U` 兜底。
 
 ### iwdg-start-late —— 启动放在所有耗时步骤之后
+
+<a id="iwdg-start-late"></a>
 
 **现象**：固件反复重启，永远进不了主循环（表现为"板子毫无反应"或反复闪启动码）。
 
@@ -175,8 +234,6 @@ WRITE_REG(hiwdg->Instance->KR, 0xAAAA)   /* Instance == NULL -> 往 0x00000000 �
   窗口，`HAL_IWDG_Init()` 会超时返回错误。此时若调 `Error_Handler()`
   （`__disable_irq() + for(;;)`），就变成"死循环 + 狗其实没跑起来"的最坏状态 ——
   板子毫无反应、**连复位都不会有**。上板实测正是如此，故只打印告警。
-
-（AGENTS.md「已知陷阱」#13 是速查版；#17 讲的是同一条"驱动失败不得致命化"约束。）
 
 ## reset-forensics
 
@@ -220,8 +277,6 @@ STM32_Programmer_CLI.exe -c port=SWD mode=hotplug -r32 0x40021024 0x04   # RCC_C
 
 ⚠ `-r32` 的 `<size>` 参数**不可省略**；且 `mode=hotplug` 有复位目标的风险，见下节。
 
-（AGENTS.md「已知陷阱」#16 是速查版。）
-
 ## debug-only-once
 
 **先怀疑自己的测量工具，再怀疑被测系统。**
@@ -244,8 +299,6 @@ STM32_Programmer_CLI.exe -c port=SWD mode=hotplug -r32 0x40021024 0x04   # RCC_C
 4. PowerShell 5.1 内置别名会吞命令：`r → Invoke-History`、`rd/Rd → Remove-Item`、
    `h/H → Get-History`。凡"读寄存器"的函数起名叫 `r` / `rd` / `h` 的脚本都会读到垃圾数据
    → **读数脚本一律用 Python 写**（`tools/probe.py`）。
-
-（AGENTS.md「已知陷阱」#10、#11、#12 是速查版。）
 
 ## nvic-grouping
 
@@ -345,4 +398,286 @@ LCD ID:7796
 
 **为什么不能改 BSP**：`Drivers/BSP/LCD/lcd.c` / `lcd.h` / `lcd_ex.c` / `lcdfont.h`
 与参考工程**逐字节相同**且是 **GBK 编码**；所有 LCD 相关改动都留在
-`Core/Src/lcd_show.c`。（AGENTS.md「已知陷阱」#26 是速查版。）
+`Core/Src/lcd_show.c`。（原 AGENTS.md「已知陷阱」连续 #26。）
+
+## light-sensor
+
+**光敏传感器是 PF8 = ADC3_IN6，不是 PA1。**
+
+- 依据官方 `Drivers/BSP/LSENS/lsens.h`：`LSENS_ADC3_CHX_GPIO_PIN = GPIO_PIN_8`（GPIOF）、
+  `LSENS_ADC3_CHX = ADC_CHANNEL_6`
+- 官方 `实验20 光敏传感器实验/readme.txt` 的"实验现象"段把它误写成 `通道6(PA1)` ——
+  **那是官方笔误**，不要采信
+- 精英版 V2 上 PA1 是电容触摸按键 TPAD / 电位器 RV1（经 P7 跳线），与光照无关；
+  官方 `adc3_init()` 顺带把 PA1 配成模拟输入是无害副作用（高阻），**建议拔掉 P7 跳线**
+- 另注：官方 `adc3.h` 里的 `ADC3_CHY_GPIO_PIN = GPIO_PIN_1` / `ADC3_CHY = ADC_CHANNEL_1`
+  是**残留默认值**，与光敏无关；**不要为了"改通道"去动 `adc.h`**（那是 ADC1/ADC2 的定义）
+- 官方 `adc3_init()` **只配 PA1、不会配 PF8**；PF8 的模拟输入模式由官方 `lsens_init()` 负责。
+  本项目在 `LightSensor_Init()` 里自行完成 `__HAL_RCC_GPIOF_CLK_ENABLE()` + PF8 的
+  `GPIO_MODE_ANALOG` + `ADC_CHANNEL_6` + `HAL_ADCEx_Calibration_Start()`，不依赖官方 `adc3.c`
+
+**光照越强，ADC 原始码值越小。**
+
+- 官方 `lsens.c`：`return (uint8_t)(100 - adc3_get_result_average(...) / 40)`，注释为
+  `0,最暗; 100,最亮` → 亮时原始 ADC ≈ 0
+- 因此统一改用 `light = 4095 - adc` 作为光强指标，**阈值判断只写在 `light` 上**
+- **不要复用 `lsens_get_val()`**：它把 4096 级压成 100 级（分辨率 2.44%），而协议 `adc`
+  声明的是 0–4095。要取原始值请用 `adc3_get_result_average(ADC_CHANNEL_6, n)`
+- 采样失败**不要**返回 0（那是"最强光"）——哨兵与门控见 [`#code-invariants`](#code-invariants)
+
+> 引脚与阈值语义的唯一事实来源是 Tech_Design.md 附录 A.1 / A.2。
+
+## actuator
+
+**执行器目标脚是 PD11，绝不能放 PD5；阶段一先用板载 LED1 等效。**
+
+- PD5 = `FSMC_NWE`（TFTLCD 写选通）。插屏后每写一次屏 PD5 就翻转，
+  执行器会**高频乱跳并破坏 LCD 时序**
+- 板载 FSMC 占用：PD0/PD1/PD4/PD5/PD8~PD10/PD14/PD15、PE7~PE15、PG0/PG12、PB0(背光)
+  —— **这些脚一律不得挪用**
+- PD11 板载未接任何器件，是外接继电器模块的目标脚，**必须预留**：该位置的排针/焊盘
+  不得接其他功能
+- **继电器借用渠道已确认，但尚未到手**，因此采用两阶段验证：
+  - **阶段一（先验实验）**：板载 LED1（PE5）作等效负载，先跑通全部控制逻辑
+  - **阶段二（正式验证与验收）**：借用件到位后换成 PD11，用真实继电器复测与演示
+- 执行器的端口/引脚/时钟/名称必须集中在 `ACTUATOR_GPIO_PORT` / `ACTUATOR_GPIO_PIN` /
+  `ACTUATOR_CLK_ENABLE` / `ACTUATOR_NAME` 四行宏里，业务代码只调 `Actuator_Init()` /
+  `Actuator_Set()`，**不得直接出现 `GPIOE` / `GPIO_PIN_5` / `GPIOD` / `GPIO_PIN_11`**；
+  阶段切换时只换这 4 行宏
+- **保留继电器接口空间**（除引脚外）：独立 5 V 与 GND 各一路通路至继电器位置、
+  模块安放位置（约 50 × 25 mm），一并不得挪作他用
+- 板载 LED 与推荐的低电平触发继电器模块**都是低电平有效**，
+  故 `ACTUATOR_ACTIVE_LEVEL = 0` 在两种配置下通用
+- 成品继电器模块**内部已自带驱动三极管、光耦与续流二极管**，接 VCC / GND / IN 三线即可，
+  **不要额外加 S8050 / 1N4007**；仅裸继电器才需要外接驱动元件
+- 优先选**低电平触发**模块：3.3 V 灌电流可靠；高电平触发时 3.3 V 仅约 2.3 mA，
+  可能推不饱光耦
+
+> 完整配置见 Tech_Design.md 附录 A.3 / A.5 / A.6。
+
+## ports
+
+**Qt 监听 9092，llama-server 占用 8092，两者必须错开。**
+
+- `D:\llama.cpp\模型启动\启动.cmd` 用 `netstat :8092 LISTENING` 判断服务是否在跑；
+  若 Qt 占了 8092，该脚本会误报"服务已在运行"
+- 节点 `AT+CIPSTART` 的目标是 `<PC_IP>:9092`；PC 建议静态 IP 或 DHCP 保留，
+  并**放行 9092 入站**（Qt 已绑 `0.0.0.0`，缺的往往是防火墙规则）
+- llama-server 服务管理（三个脚本都在 `D:\llama.cpp\模型启动\`）：
+  `启动.cmd` / `状态.cmd` / `停止.cmd`；日志落 `D:\llama.cpp\logs\server.log`
+- 服务以 **router 模式**运行（`--models-dir --models-max 1`）：模型按需加载、
+  同一时刻仅驻留一个。请求体的 `model` 字段取值必须来自 `GET /v1/models`；
+  **首次请求 / 切换模型要付权重加载时间**，演示前必须先预热一次；
+  若不需要切模型，直接用固定单模型启动（`-m glm-4.7-flash.gguf`）
+- **工具也会抢端口**：`tools/hil_probe.py`（硬件在环验证探针，代替 Qt 当 TCP 服务端）
+  **不可与 Qt 上位机同时运行**；其端口须与固件 `wifi_config.h` 一致
+
+## beep-led
+
+**蜂鸣器 PB8 是"高电平响"，且上电必须为关。**
+
+- 官方 `beep.c` 的 `beep_init()` 末尾是 `BEEP(0)`（关闭），即 `GPIO_PIN_SET` 才是鸣响
+- 板载蜂鸣器高电平响，初始化遗漏会让它**上电就一直叫**；
+  `beep_init()` 必须先于业务逻辑调用
+
+**两颗板载 LED 分工固定，不要混用。**
+
+- LED0（PB5，红）= **运行心跳**，每 **5 s** 翻转一次（5 s 亮 / 5 s 灭）
+- LED1（PE5，绿）= **执行器指示**，由执行器抽象驱动
+- 板载 LED 是**低电平点亮**（官方 `led.c`：`LED0(1)` / `LED1(1)` 均为关闭）
+- 不要让同一颗灯同时承担"程序活着"和"执行器吸合"两种语义，
+  否则演示时无法判断灯亮的原因
+
+## tts
+
+**TTS 语音名容易写错，且 Qt TextToSpeech 模块本机未装。**
+
+- **`Microsoft Xiaoxiao` 本机不存在**（它是"讲述人"的自然语音，SAPI/TextToSpeech 取不到），
+  不要把它写成默认值
+- 本机可用的中文语音：SAPI5 仅 `Microsoft Huihui Desktop`；OneCore 另有
+  Huihui / Kangkang / Yaoyao
+- 实现要求：`availableVoices()` 枚举 + 按 `zh-CN` 过滤 + 回退，不要硬编码
+- 前置条件：Qt 6.12.0 MinGW 套件当前**未安装 Qt TextToSpeech 模块**，
+  需用 MaintenanceTool 补装后才能编译播报功能（未装时 CMake 自动探测并关闭播报，
+  其余功能不受影响）
+
+## ascii-path
+
+**源码路径含中文会让 Qt 的 moc 失败（本仓库路径就是中文）。**
+
+- 现象：`AutoMoc: moc: Cannot create <...>/moc_xxx.cpp. Error: No such file or directory`，
+  随后 `mocs_compilation.cpp` 里 `#include "xxx/moc_yyy.cpp"` 找不到文件
+- 原因：Qt 的 AutoMoc 无法把生成文件写入非 ASCII 路径；**不要**试图用 8.3 短路径绕过
+  —— 本机短路径仍是中文（`D:\正点原子\个人项~1\智能温~1`）
+- **正确做法**：用 `tools/build.ps1`（自动建 `D:\glc -> 仓库根` 的 ASCII 联接后构建），
+  或手工建立同类联接 / 把工程放到纯 ASCII 路径
+- `build.ps1` 同时负责探测 Keil（`D:\MDK5.36`）与 Qt（`E:\Qt`）并注入 PATH
+
+## keil-project
+
+**Keil 工程不要手改，用脚本生成。**
+
+- 官方模板缺 `stm32f1xx_hal_i2c.c`（AT24C02）与 `stm32f1xx_hal_iwdg.c`（看门狗），
+  **手写工程必漏**
+- 增删源文件后跑 `py tools/make_keil_project.py` 重新生成 `greenhouse.uvprojx`；
+  `--check` 只做引用校验
+
+**只给 `.uvprojx` 会导致烧录失败 —— 调试器选择在 `.uvoptx` 里。**
+
+- 现象：`UV4 -f` 报 `Internal DLL Error` + `Flash Download failed - Target DLL has been cancelled`
+- 原因：**调试器选择不属于工程（uvprojx），只存在于用户选项（uvoptx）**。缺少 uvoptx 时
+  Keil 回退到官方模板的默认调试器 = ULINK2（`BIN\UL2CM3.DLL`），本机没有 ULINK 设备
+  → 下载被取消
+- 本机是 **ST-Link**，对应 `nTsel=6` + `pMon=STLink\ST-LINKIII-KEIL_SWO.dll`
+  （该 DLL 随 Keil 提供：`D:\MDK5.36\ARM\STLink\`）
+- `tools/make_keil_project.py` 会**同时生成 `greenhouse.uvoptx`**（基于
+  `_template_atk_f103.uvoptx`，锁定为 ST-Link），所以正常流程不该再遇到此问题；
+  若手工只放了 uvprojx，请重跑该脚本
+- **`_template_atk_f103.uvoptx` 不要删** —— 脚本需要它才能生成带 ST-Link 配置的
+  `greenhouse.uvoptx`；缺失时新克隆会退回 ULINK2，报 `Internal DLL Error` /
+  `Flash Download failed`
+- 成功的烧录日志长这样：
+  `Erase Done. Programming Done. Verify OK. Application running ...`
+
+## bom
+
+**`tools/build.ps1` 含中文，必须保持 "UTF-8 with BOM"。**
+
+- 现象：脚本突然报 `Unexpected token` / `Missing closing '}'` / 字符串被截断
+- 原因：Windows PowerShell 5.1 把**无 BOM** 的 UTF-8 当 ANSI 读。用文本工具
+  （含 AI 写文件）重写该文件会**静默丢掉 BOM**
+- 修复一行：
+
+  ```powershell
+  $p='tools\build.ps1'; $t=[IO.File]::ReadAllText($p,[Text.Encoding]::UTF8)
+  [IO.File]::WriteAllText($p,$t,(New-Object Text.UTF8Encoding($true)))
+  ```
+
+- 同理适用于任何含中文的 `.ps1`（`.md` 与 `.py` 不受影响，它们按 UTF-8 读）
+
+## esp8266-at
+
+**ESP8266 AT 时序四坑（每一条都实测踩过）。**
+
+1. **`AT+CIPSTART` 是异步的**：先回 `OK`（命令已接受），再回 `CONNECT`（真正建链）。
+   **只有 `CONNECT` / `ALREADY CONNECTED` 才算连上**，把 `OK` 当成功会得到
+   "板子自认已连接、PC 侧却没有 Established"的假象。
+2. **`AT+CIPMODE=1`（透传）必须在 `AT+CIPSTART` 之前设**，顺序是
+   `CIPMUX=0 → CIPMODE=1 → CIPSTART → CONNECT → CIPSEND → OK → '>'`。
+   先 CIPSTART 再 CIPMODE=1 时，CIPSTART 能拿到 CONNECT、CIPMODE 也回 OK，
+   但紧接着的 `AT+CIPSEND` 会直接回 **`ERROR`**，永远进不了透传。
+   （原因：CIPMODE 必须在建链时就确定，建链之后再切不会让模块重新进入透传。）
+   > ⚠ **与文档的现存冲突（本次核查发现，尚未同步）**：`Tech_Design.md`
+   > 的 AT 状态机 FACT 块与其后说明写的是 `CIPSTART → CIPMODE=1`，
+   > `firmware/Core/Src/esp8266.c:6` 的文件头注释也残留同一旧顺序；
+   > 而实际实现（`esp8266.c:333-345`）与本节一致 —— **以代码 + 本节为准**，
+   > `ESP_CIPMODE` 状态已不再使用（保留枚举只为兼容）。
+3. **重烧 MCU 不会复位 ESP8266 模块**（模块由整板供电，只有整板断电才复位）。
+   上一次若停在透传态，模块会**不解释任何 AT 命令**（把它们当 TCP 数据发出去），
+   表现为 `AT+RST` 永远等不到 `ready` → 无限退避、`net` 恒为 0。
+   解法：`ESP_RST` 先发**裸 `+++`**（前后各需 ≥20 ms 静默）再发裸 `CRLF` 清残行，
+   最后才 `AT+RST`。
+4. **绝不能用 `at_send("+++")`** —— 该函数会补 `\r\n`，而 `+++` 转义序列
+   **不能带 CR/LF**，带了就失效。必须用裸 `esp_uart_write()`。
+
+## toolchain-hygiene
+
+**烧录 / 调试不必依赖 Keil —— ST 官方工具链已在 VS Code 扩展里解压就绪。**
+
+- 位置：`%LOCALAPPDATA%\stm32cube\bundles\`
+- `STM32_Programmer_CLI.exe`（`programmer\2.23.0\bin\`）——**绕开 Keil 的 ST-Link DLL**，
+  Keil 报 `ST-LINK USB communication error` / `Target DLL has been cancelled` 时的可靠替代：
+  - 烧录校验：`-c port=SWD mode=normal -w <hex> -v -rst`
+  - 读内核寄存器：`-c port=SWD mode=hotplug -coreReg`（**hotplug 不复位**，能抓真实现场）
+  - 读内存：`-c port=SWD mode=hotplug -r32 <addr> <size>`（**`<size>` 不可省略**）
+  - 读复位原因：`-r32 0x40021024 0x04`（`RCC_CSR`：`IWDGRSTF` 等标志位）
+- `ST-LINK_gdbserver.exe`（`stlink-gdbserver\7.14.0+st.2\bin\`）+ `arm-none-eabi-gdb.exe`
+  （`gnu-gdb-for-stm32\`）可做断点级调试。**两个坑**：
+  (a) gdb 连接时会自动复位目标；
+  (b) `break <符号名>` 可能命中启动文件里的**弱定义** —— `HardFault_Handler` 会解析到
+  `0x08000242` 而非向量表里的 `0x0800551C`。**定位异常请用绝对地址**：`break *0x0800551c`
+- `arm-none-eabi-gcc / objdump / nm / addr2line` 14.3.1 位于
+  `gnu-tools-for-stm32\14.3.1+st.2\bin\`
+- ⚠ `mode=hotplug` 有复位目标的风险，读数方法与坑见 [`#debug-only-once`](#debug-only-once)
+
+**其他工具链卫生。**
+
+- **AC6 把隐式函数声明当错误**（`-Wimplicit-function-declaration`）。新增跨模块调用后
+  **必须补对应 `#include`**，否则直接编译失败。
+  本次 `Light_IsValid()` / `Dbg_Printf()` / `Protocol_Reset()` 各踩一次。
+- **串口工具的 DTR/RTS 组合决定板子是否被按在复位上。** 实测可用组合是
+  **`DTR=False / RTS=False`**；另外三种（含 T/T）收到 0 字节。组合不对时表现为
+  "串口只有几个乱码字节"或"开着串口板子不启动、一关就启动"。
+- **`DEBUG_UART=0` 时串口一个字节都不会有**（`Dbg_Init` 是空实现，`USART1` 未初始化）。
+  上板诊断前先确认 Keil 工程 `<Define>` 里有 `DEBUG_UART=1`。
+
+## code-invariants
+
+**驱动失败不得致命化（架构性约束）。**
+
+- 业务模块一律返回状态码，**绝不调用 `Error_Handler()`**。
+  `Error_Handler()` 是 `__disable_irq() + for(;;)`；而 `MX_IWDG_Init()` 在 `main()` 末尾，
+  `adc_light.c` / `eeprom.c` / `esp8266.c` 的初始化都**在它之前** → 触发即
+  **永久挂死且连复位都没有**（狗还没开）。
+- 参考工程把 `Error_Handler` 的调用**限制在 CubeMX 生成的 `Core/` 文件里**，
+  `User/App/**` 与 `Drivers/BSP/**` 一次都没有 —— 这就是它守住的那条边界。
+
+**采样失败不能与"极值"共用同一个返回值。**
+
+- `Light_ReadRaw` 原来失败时 `return 0`，而 `LIGHT_FROM_ADC(0) = 4095 = 最强光`
+  → "传感器故障"被翻译成"光照过强报警"并驱动执行器。
+- 现在：失败时返回哨兵 `ADC_LIGHT_INVALID = 0xFFFF`（12 位量程内不可能出现），
+  **保持上次有效值** + `Light_IsValid()` 标志，`Control_Loop()` 在无效时
+  **拒绝任何自动决策**（维持现状）。
+
+**断链 / 重连时必须复位协议层的行装配器。**
+
+- 断了半帧后重连，新字节会被追加到旧半帧之后 → 第一条指令必然解析失败且
+  **静默丢弃**（上位机只看到 ack 超时）。故有 `Protocol_Reset()`，
+  由 `on_link_lost()` 调用（参考工程对应的是 `mqtt_rx_reset()`）。
+
+**cJSON 是 malloc 型解析器，堆预算必须留足。**
+
+- 每字符串 / 每数字 / 每节点都分配，一条典型指令约 300~390 B。
+  原来 `Heap_Size = 0x200`（512 B）只够 60~77%，再加几个"未知键"（设计上要忽略）
+  就越界 → `malloc` 失败 → `cJSON_Parse` 返回 NULL → **整条指令静默丢弃**。
+- 现已提到 `0x1000`（4 KB，约 10 倍余量）。
+- ⚠ **口径不一致（本次核查发现，尚未同步）**：`firmware/CUBEMX_SETUP.md` 步骤 ⑤
+  仍写"建议把 `Heap_Size` 调到 `0x800` 以上"，与工程实际值 `0x1000` 不同；
+  **以 `startup_stm32f103xe.s` 里的实测值为准**。
+
+**其他代码不变式。**
+
+- **`IT` 侧的 relay 与 buzz 已解耦**，报警声走 `ALARM_BEEP_ON_MS` /
+  `ALARM_BEEP_OFF_MS`（各 10 s）占空比。**不要退回 `g_buzz = g_relay`** ——
+  那会让遮阳动作期间蜂鸣器连续长鸣数小时。
+- **配置宏的单一事实源**：`LIGHT_ADC_MAX` 在 `main.h`（`adc_light.h` 只保留
+  `LIGHT_FROM_ADC`）；`PROTOCOL_FRAME_MAX` 在 `protocol.h`（`protocol.c` 引用它）。
+  曾出现同一常量三处副本（`200`/`200`/`200`）与四处硬编码 `4095`，改一处必漏改。
+- **`#if DEBUG_UART` 不要写成 `#ifdef DEBUG_UART`** —— `main.h` 里它是
+  **无条件定义**的（缺省 0），`#ifdef` 恒为真，语义就反了。
+- **Qt 配置用 QSettings**，组织名 `Greenhouse`、应用名 `LightControl`
+  （配置项清单见 Tech_Design.md §配置项）。
+
+## attic
+
+**地雷文件已移出 `firmware/` 树到 `_attic/`。**
+
+- 已移出：`Drivers/_bak_cmsis`、`Drivers/_bak_hal`（含 63 个重复 `.c` 与 40+ 组重名
+  include guard）、`Drivers/SYSTEM/usart/usart.c`（重复的 `fputc` / `_sys_*` /
+  `HAL_UART_RxCpltCallback`）、`Drivers/BSP/{ADC,LED,LSENS}`（`adc.h` 与 `adc3.h` 共用
+  `__ADC_H` guard 且 `ADC_ADCX` 一处是 ADC1 一处是 ADC3；`led.h` 的 PE5 与 `control.c`
+  的执行器同脚）、`Middlewares/cJSON/cjson_test.c`（自带 `main()`）
+- **⚠️ 这些文件一旦被"顺手加进 Keil 工程"就是链接失败或语义冲突。**
+- **`usart.h` 必须留在 `Drivers/SYSTEM/usart/`** —— `lcd.c:36` 依赖它（移走会编译失败，
+  已实测）。搬移任何文件后**必须重建验证**。
+- 基线提交 `9defdeb` 刻意保留了清理前的 `_attic/`，**目的就是让那次删除可完全恢复**：
+  `git checkout 9defdeb -- _attic/`（或指定单个子目录）。
+
+**`Drivers/BSP/LCD/lcd_ex.c` 绝不能加入工程。**
+
+- `lcd.c` 已 `#include` 它，再加为独立编译单元会导致 7 个 `lcd_ex_*_reginit` 重复定义。
+
+**`lcd.c` / `lcd.h` / `lcd_ex.c` / `lcdfont.h` 与参考工程逐字节相同**，且是 **GBK 编码**
+（`read` 工具会报 `invalid UTF-8 text`，需按 GBK 解码读）。
+**所有 LCD 相关修改都应留在 `Core/Src/lcd_show.c`，不要动 BSP。**（详见 [`#lcd`](#lcd)）
