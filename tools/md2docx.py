@@ -330,6 +330,14 @@ def parse_blocks(lines):
             i += 1
             continue
 
+        # FACT / GENERATED 标记行只服务于 tools/sync_doc_tables.py 的防漂移机制，
+        # 是**机器元数据**，不应出现在提交稿的正文里。这里只跳过顶层标记行；
+        # 引用块内的 `<!-- GENERATED:BEGIN <id> -->` 是讲解该机制的示例，必须保留，
+        # 而它先被下面的 quote 分支收走，不会走到这里。
+        if re.match(r"^<!--\s*(FACT|GENERATED):", stripped):
+            i += 1
+            continue
+
         if stripped.startswith("```"):
             i += 1
             buf = []
