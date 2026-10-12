@@ -41,14 +41,26 @@ def check_generated_scaffold(errors, warns):
     if not os.path.isdir(drivers):
         errors.append("Drivers/ 不存在：CubeMX 尚未生成 HAL 与 CMSIS（含 stm32f1xx_hal.c / 启动文件 / system_stm32f1xx.c）")
         return
-    d = _find(drivers, {"stm32f1xx_hal.c", "system_stm32f1xx.c"})
+    d = _find(drivers, {"stm32f1xx_hal.c"})
     if "stm32f1xx_hal.c" not in d:
         errors.append("缺少 stm32f1xx_hal.c（HAL 核心）")
-    if "system_stm32f1xx.c" not in d:
-        errors.append("缺少 system_stm32f1xx.c（系统时钟/总线默认配置）")
+    # ★ 修死守卫：system_stm32f1xx.c 与启动文件**都不在 Drivers/ 下**：
+    #   · system_stm32f1xx.c    -> Core/Src/（业务工程维护）
+    #   · startup_stm32f103xe.s -> Projects/MDK-ARM/（Keil 工程目录）
+    # 旧版在 Drivers/ 子树里找这两个 -> **永远找不到** -> 必然 append 一条
+    # "缺少 system_stm32f1xx.c" 并以退出码 1 结束。这是"守卫看着在守、其实
+    # 守不住"的典型：它报的错是假的，真正的缺失反而检不出来。
+    if not os.path.isfile(os.path.join(core, "Src", "system_stm32f1xx.c")):
+        errors.append("缺少 Core/Src/system_stm32f1xx.c（系统时钟/总线默认配置）")
     # 启动文件（高密度 ZET6）
-    startup = _find(drivers, {"startup_stm32f103xe.s", "startup_stm32f103xe.sfd",
-                              "startup_stm32f103xg.s"})
+    startup = {}
+    for _r in (os.path.join(ROOT, "Projects"), drivers):
+        if os.path.isdir(_r):
+            _f = _find(_r, {"startup_stm32f103xe.s", "startup_stm32f103xe.sfd",
+                            "startup_stm32f103xg.s"})
+            if _f:
+                startup = _f
+                break
     if not startup:
         warns.append("未找到 startup_stm32f103xe.s（ZET6 高密度启动文件）；Keil/CLion 工程需包含它")
 

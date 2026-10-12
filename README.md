@@ -107,7 +107,10 @@ py firmware/prebuild_check.py          # 固件编译前自检
 
 > 若用 CubeMX 重新生成工程：**必须删掉 `Core/Src/stm32f1xx_it.c` 里的 `USART3_IRQHandler`**
 > （已在 `esp8266.c` 定义），且不要让 CubeMX 重复初始化 PF8 / PB6-PB7 / PB10-PB11 / PB8 / PE5 / PB5。
-> `firmware/prebuild_check.py` 会守卫这两条。
+> `firmware/prebuild_check.py` 会**机器校验**：`USART3_IRQHandler` 是否重复定义、`STM32F103xE`
+> 设备宏、以及 `Core/Src/system_stm32f1xx.c` 与启动文件是否存在。
+> **引脚主权（PF8/PB6-PB7/PB10-PB11/PB8/PE5/PB5）它只打印清单提醒、不做机器校验**，
+> 需人工按 `firmware/CUBEMX_SETUP.md` 的归属表核对。
 
 ### 3. Qt 上位机
 
