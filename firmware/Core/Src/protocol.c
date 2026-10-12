@@ -35,6 +35,13 @@ static volatile uint16_t s_rx_head;
 static volatile uint16_t s_rx_tail;
 static char     s_line[RX_LINE_BUF];
 static uint16_t s_line_len;
+/* 1 = 当前这一行已超长，正在"丢弃至行尾"。
+ * ★ 为什么必须有这个标志（P-2 修复）★
+ * 原实现达到上限时只把 s_line_len 清 0 就继续累积后续字符，于是超长行的
+ * **尾巴**会在遇到 '\n' 时被当成一帧交出去（实测 250 字节的 'A' 行产出
+ * strlen=50 的帧）。而尾巴若恰好构成合法 JSON，就会被当成**真指令执行**。
+ * 整行丢弃才是唯一安全的语义。 */
+static uint8_t  s_line_overlong;
 
 /* 清空上一轮的链路残留（行装配器 + 环形缓冲）。
  * 断链若正好停在一帧 JSON 中途，s_line 里会留半帧且 s_line_len > 0；
@@ -52,8 +59,9 @@ void Protocol_Reset(void)
     s_rx_tail = 0U;
     __enable_irq();
 
-    s_line_len = 0U;
-    s_line[0]  = '\0';
+    s_line_len      = 0U;
+    s_line[0]       = '\0';
+    s_line_overlong = 0U;      /* 断链/重连时也要清掉"丢弃态"，否则新链路会被一直吞 */
 }
 
 void Protocol_RxByte(uint8_t b)
@@ -89,6 +97,14 @@ bool Protocol_PopCommand(char *out, size_t cap)
 
     while ((c = ring_pop()) >= 0) {
         if (c == '\n' || c == '\r') {
+            if (s_line_overlong != 0U) {
+                /* ★ 超长行：**整行丢弃**，绝不把截断的尾巴当帧交出去。
+                 * 这也是"静默失败"最该避免的形态 —— 尾巴若恰好是合法 JSON，
+                 * 就会被当真指令执行；宁可丢一整行，也不能执行半行。 */
+                s_line_overlong = 0U;
+                s_line_len      = 0U;
+                continue;                      /* 空行处理，不返回 */
+            }
             if (s_line_len == 0U) {
                 continue;                  /* 空行 / \r\n 的 \n：忽略 */
             }
@@ -98,10 +114,16 @@ bool Protocol_PopCommand(char *out, size_t cap)
             s_line_len = 0U;
             return true;
         }
+        if (s_line_overlong != 0U) {
+            continue;                      /* 已在丢弃态：不再往缓冲里写 */
+        }
         if (s_line_len < (RX_LINE_BUF - 1U)) {
             s_line[s_line_len++] = (char)c;
         } else {
-            s_line_len = 0U;               /* 超长无换行：丢弃并复位，防缓冲被撑爆 */
+            /* 达到上限：进入"丢弃至行尾"状态。
+             * 注意这里**不能**只清 s_line_len 就继续累积 —— 那正是原缺陷。 */
+            s_line_overlong = 1U;
+            s_line_len      = 0U;
         }
     }
     return false;
