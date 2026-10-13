@@ -94,7 +94,7 @@ tools/
 ├─ bump_version.py            文档集版本号 + 修订记录一次同步
 └─ md2docx.py                 项目规划书 md → docx
 tests/
-└─ host/                      主机端行为测试（原生 gcc 编译 control.c / protocol.c 原文）
+└─ host/                      主机端行为测试（原生 gcc 编译 control.c / protocol.c / eeprom.c 原文）
 ```
 
 ## 快速开始（分步）
@@ -105,7 +105,7 @@ tests/
 py tools/contract_test.py              # 11 个契约测试，必须全绿
 py tools/consistency_check.py          # 38 项跨层一致性（固件/Qt/契约/文档 四处对齐；数目以脚本输出为准）
 py tools/simulate_node.py --selftest   # 虚拟节点状态机自测（含手动优先、断帧残留）
-py tests\host\run_host_tests.py        # 主机端行为测试（control 129 + protocol 68 用例）
+py tests\host\run_host_tests.py        # 主机端行为测试（control 129 + protocol 68 + eeprom 41 用例）
 py firmware/prebuild_check.py          # 固件编译前自检
 ```
 

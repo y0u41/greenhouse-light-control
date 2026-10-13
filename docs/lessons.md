@@ -33,6 +33,7 @@
 | [`#bom`](#bom) | 含中文的 `.ps1` 必须保持 UTF-8 **with BOM** |
 | [`#esp8266-at`](#esp8266-at) | ESP8266 AT 时序四坑（异步 CIPSTART / CIPMODE 顺序 / 重烧不复位 / `+++`） |
 | [`#toolchain-hygiene`](#toolchain-hygiene) | 工具链卫生：烧录与调试的替代路径、AC6 隐式声明、DTR/RTS、`DEBUG_UART` |
+| [`#eeprom-ack-poll`](#eeprom-ack-poll) | I2C ACK 轮询必须有探测间隔，否则写周期内整轮耗尽误报失败 |
 | [`#code-invariants`](#code-invariants) | 代码不变式：失败不致命、单一事实源、行装配器复位、cJSON 堆预算 |
 | [`#attic`](#attic) | 工程卫生地雷：`_attic/`、`lcd_ex.c`、`_template_*.uvoptx` |
 
@@ -609,6 +610,26 @@ LCD ID:7796
   "串口只有几个乱码字节"或"开着串口板子不启动、一关就启动"。
 - **`DEBUG_UART=0` 时串口一个字节都不会有**（`Dbg_Init` 是空实现，`USART1` 未初始化）。
   上板诊断前先确认 Keil 工程 `<Define>` 里有 `DEBUG_UART=1`。
+
+## eeprom-ack-poll
+
+**I2C ACK 轮询必须在探测之间留间隔，否则整轮会在写周期开始的瞬间耗尽。**
+
+- 现场现象（N-1）：`set_th` 回 `err` 并回滚，串口实捕
+  `[cfg] EEPROM_Save FAILED for th=503 -> rolled back to 2000`；
+  但逻辑分析仪显示 0x50 应答 ACK、位翻转探测也有 ACK —— "器件明明在"。
+- 根因（主机测试 `test_eeprom.c` 的 `write_cycle_busy_then_ack` 用例复现）：
+  AT24C02 页写入后进入 **≤5 ms 内部写周期**，期间对**地址探测**一律 NACK；
+  而 `HAL_I2C_IsDeviceReady` 在探测到 NACK 时**立即**返回 `HAL_ERROR` ——
+  它的 `Timeout` 参数只约束"等总线标志位"的时间，**不是两次探测之间的间隔**。
+  旧代码连续 20 次探测之间不加任何等待，整轮在 **<<1 ms** 内耗尽，
+  于是即使数据其实已经写进去，`EEPROM_Save` 也**误报失败**。
+- 修法：每次探测后 `HAL_Delay(1)`（10 次 × 1 ms = 10 ms 窗口 ≥ 5 ms 写周期，
+  总耗时远小于 IWDG 超时；每 5 次探测喂一次狗）。附带回读校验与
+  I2C 外设锁死恢复（`HAL_I2C_DeInit` + 重 Init 后重试一次）。
+- 复现/回归方法：`py tests/host/run_host_tests.py`（eeprom 套件）。
+  伪 AT24C02 把"写周期忙"建模为 `tick < write_busy_until` 时探测/读立即 NACK，
+  `HAL_Delay` 推进 tick —— 没有间隔的旧轮询在 tick 不变时必然耗尽 → 用例红。
 
 ## code-invariants
 

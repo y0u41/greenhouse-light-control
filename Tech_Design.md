@@ -580,7 +580,7 @@ void Control_OnCommand(const char *action, int32_t value)
         /* ★ 如实回报落盘结果，并回滚 g_th，让 "err" 的语义唯一：指令未生效 ★ */
         uint16_t old_th = g_th;
         g_th = (uint16_t)value;
-        if (!EEPROM_Save(g_th, g_hys)) {              /* I2C 写失败 / 20 次 ACK 轮询全败 */
+        if (!EEPROM_Save(g_th, g_hys)) {              /* 写失败 / ACK 轮询耗尽 / 回读校验不符（含一次重试） */
             g_th = old_th;                            /* 回滚：不留半生效状态 */
             Protocol_SendAck(action, "err");
             return;
@@ -719,7 +719,7 @@ DISCONNECT ←──────── 网络断开 / 错误 / AT 超时 / 收�
 
 - IWDG 溢出周期 **≈ 6.4 s**（LSI ≈ 40 kHz，预分频 64 → 625 Hz，重装值 4000 → 4000 ÷ 625 = 6.4 s）
 - **超时余量是刻意留的**：`MX_IWDG_Init()` 紧邻 `for(;;)` 之前才调用，开机路径（含 `Led0_BlinkMark(2)` ≈ 1.1 s）不消耗超时余量；"开狗 → 主循环首次喂狗"约 1.2 s，对 6.4 s 有约 **5×** 余量
-- 主循环顶部喂狗；`Esp8266_Poll()` 的每个等待步进内也喂狗；EEPROM 页写入后的 ACK 轮询**每 5 轮喂一次狗**
+- 主循环顶部喂狗；`Esp8266_Poll()` 的每个等待步进内也喂狗；EEPROM 页写入后的 ACK 轮询**每次探测间隔 1 ms、每 5 轮喂一次狗**（探测间隔是正确性要求，见 `docs/lessons.md#eeprom-ack-poll`）
 - 验收要求"连续运行 30 分钟无死机"，IWDG 是这条要求最直接的保障手段
 
 ---
