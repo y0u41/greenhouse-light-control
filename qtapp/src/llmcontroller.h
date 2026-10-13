@@ -45,6 +45,11 @@ signals:
     void requestAsk(const QString &userText, const QString &stateJson);
     void requestFetchModels();
 
+    /* 工作线程 → 主线程：登记 LlmClient 指针。
+     * m_llm 的写入必须收敛到主线程（QueuedConnection 消费本信号），
+     * 否则"工作线程构造时写 / 主线程 onModelsReady 读"构成数据竞争。 */
+    void clientCreated(LlmClient *client);
+
     /* 推理结果与失败原因，原样透传给 MainWindow（对话区/状态栏由 UI 决定） */
     void llmFinished(const QString &content);
     void llmFailed(const QString &reason);

@@ -23,6 +23,12 @@ public:
     static bool validate(const QJsonObject &cmd, int hys, QString *why = nullptr);
     static QJsonObject buildCmd(int nodeId, const QString &action, int value = -1);
 
+    /* 与 validate 同语义的 value 提取：先截断取整（向零），超大值夹到 int 范围。
+     * ★ 调用方不得直接用 QJsonValue::toInt()：它对**非整数 double**（如 2500.9）
+     * 不转换、直接返回默认值 0 —— 与 validate 的截断语义分叉（2500.9 会变成
+     * value=0 被二次校验拦下）。MainWindow 的 LLM 指令路径必须走本函数。 */
+    static int extractValue(const QJsonObject &cmd);
+
 signals:
     void accepted(int nodeId, const QString &action, int value);
     void rejected(const QString &why);

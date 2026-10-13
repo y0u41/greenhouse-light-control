@@ -435,8 +435,11 @@ void MainWindow::onLlmFinished(const QString &content)
     }
 
     const QString action = cmd.value(QStringLiteral("action")).toString();
+    /* ★ 不用 QJsonValue::toInt()：它对非整数 double（如 2500.9）返回默认值 0，
+     * 与 validate 的截断语义分叉（会被二次校验以"阈值 0"的莫名理由拦下）。
+     * 统一走 CommandEngine::extractValue（与 Python int()/固件截断同语义）。 */
     const int value = cmd.contains(QStringLiteral("value"))
-                          ? cmd.value(QStringLiteral("value")).toInt() : -1;
+                          ? CommandEngine::extractValue(cmd) : -1;
     if (!m_engine->submit(m_currentNode, action, value, &why)) {
         appendChat(tr("系统"), tr("指令未下发：%1").arg(why));
     }

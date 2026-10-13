@@ -97,17 +97,11 @@ void NodeServer::onReadyRead()
     }
     m_bufs[s].append(s->readAll());
 
-    // 单连接接收缓冲上限：对端持续发"无换行"数据时不能无限增长。
-    // 固件侧有 512 B 无换行丢弃上限，服务端这里对称设限。
-    static constexpr int kMaxRxBuffer = 8192;
-    if (m_bufs[s].size() > kMaxRxBuffer) {
-        emit logMessage(QStringLiteral("接收缓冲超限（%1 B），已丢弃：%2:%3")
-                            .arg(m_bufs[s].size())
-                            .arg(s->peerAddress().toString())
-                            .arg(s->peerPort()));
-        m_bufs[s].clear();
-    }
-
+    /* ★ 先拆帧、再处理残段超限（顺序不能反）：
+     * 一次 readyRead 里可能积压一大批**完整合法帧**（例如 TCP 突发把多个
+     * 1 Hz 上报攒在一起），旧逻辑先判"缓冲 > 8192 就清空"，会把这一批帧
+     * **全部**丢掉——包括那些本该正常处理的。正确顺序：先把带 '\n' 的完整帧
+     * 处理完；剩下的"无换行残段"才是真正的垃圾风险，才做超限丢弃。 */
     for (;;) {
         const int idx = m_bufs[s].indexOf('\n');
         if (idx < 0) {
@@ -118,6 +112,19 @@ void NodeServer::onReadyRead()
         if (!line.isEmpty()) {
             handleFrame(s, line);
         }
+    }
+
+    // 单连接**残段**上限：对端持续发"无换行"数据时不能无限增长。
+    // 固件侧对无换行数据的上限是 PROTOCOL_FRAME_MAX(200 B)——超长行被丢弃至行尾
+    // （见 protocol.c 的 s_line_overlong）；服务端这里对称设限，但要允许
+    // "突发积压多帧后被拆走"的合法场景，故取 8192。
+    static constexpr int kMaxRxBuffer = 8192;
+    if (m_bufs[s].size() > kMaxRxBuffer) {
+        emit logMessage(QStringLiteral("接收残段超限（%1 B），已丢弃：%2:%3")
+                            .arg(m_bufs[s].size())
+                            .arg(s->peerAddress().toString())
+                            .arg(s->peerPort()));
+        m_bufs[s].clear();
     }
 }
 
@@ -190,6 +197,16 @@ void NodeServer::learnNode(QTcpSocket *sock, int nodeId)
         m_sockNode.insert(sock, nodeId);
     }
     if (m_sockets.value(nodeId, nullptr) != sock) {
+        /* 同一 nodeId 被新连接认领：先断开旧 socket，避免两条连接互相争抢
+         * 路由（旧连接的 readyRead 仍会触发 learnNode，把 nodeId 又抢回去，
+         * 造成新旧连接"乒乓"交替占有）。abort() 触发 disconnected ->
+         * forgetSocket，由它清理旧 socket 的缓冲与路由残留。 */
+        if (QTcpSocket *old = m_sockets.value(nodeId, nullptr)) {
+            if (old != nullptr && old != sock) {
+                emit logMessage(QStringLiteral("节点 %1 被新连接接管，断开旧连接").arg(nodeId));
+                old->abort();
+            }
+        }
         m_sockets.insert(nodeId, sock);
     }
     if (!m_model->node(nodeId).online) {

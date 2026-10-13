@@ -129,10 +129,13 @@ void CsvLogger::appendReport(const QJsonObject &frame, qint64 recvMs)
     for (int i = 0; i < kReportKeyCount; ++i) {
         const QString key = QLatin1String(kReportKeys[i]);
         line += QLatin1Char(',');
-        /* 缺字段写空列，**不**用 0 冒充：0 是合法取值（relay=0 断开、mode=0 自动），
-         * 用 0 填会把"没收到"伪造成"收到了一个 0"。 */
-        if (frame.contains(key)) {
-            line += csvField(QString::number(frame.value(key).toInt()));
+        /* 缺字段或非数值字段写空列，**不**用 0 冒充：0 是合法取值
+         * （relay=0 断开、mode=0 自动），用 0 填会把"没收到/格式错"
+         * 伪造成"收到了一个 0"。QJsonValue::toInt() 对字符串/布尔返回默认值 0，
+         * 必须先 isDouble() 判定再取值。 */
+        const QJsonValue v = frame.value(key);
+        if (v.isDouble()) {
+            line += csvField(QString::number(v.toInt()));
         }
     }
     line += QLatin1String(kEol);

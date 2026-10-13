@@ -38,6 +38,8 @@
 #include <QTemporaryFile>
 #include <QVector>
 
+#include <climits>
+
 #include "commandengine.h"
 #include "csvlogger.h"
 #include "protocol_actions.h"
@@ -321,6 +323,9 @@ private slots:
     // ---- ★ 历史数据落盘（CSV）----
     void csvLoggerWritesHeaderAndRows();
     void csvLoggerFailsSoftlyOnUnwritablePath();
+
+    // ---- ★ value 提取与 validate 的截断语义一致性 ----
+    void extractValueTruncatesLikePython();
 
 private:
     QVector<Case> m_cases;
@@ -895,6 +900,46 @@ void TestCommandEngine::csvLoggerFailsSoftlyOnUnwritablePath()
     QCOMPARE(offMessages, 1);
     off.appendReport(reportFrame(1, 1, 4094), 1234);
     QCOMPARE(offMessages, 1);
+}
+
+void TestCommandEngine::extractValueTruncatesLikePython()
+{
+    // ★ 回归锁：QJsonValue::toInt() 对 2500.9 返回 0（非整数 double 不转换），
+    // extractValue 必须截断为 2500 —— 与 Python int() / 固件 (int32_t)valueint 同语义。
+    QJsonObject c;
+    c.insert(QStringLiteral("value"), 2500.9);
+    QCOMPARE(CommandEngine::extractValue(c), 2500);
+
+    // 向零截断：int(-0.5) == 0（Python 语义），量程检查在截断后的整数域进行
+    c.insert(QStringLiteral("value"), -0.5);
+    QCOMPARE(CommandEngine::extractValue(c), 0);
+
+    c.insert(QStringLiteral("value"), 4095.999);
+    QCOMPARE(CommandEngine::extractValue(c), 4095);
+
+    // 整数原样通过
+    c.insert(QStringLiteral("value"), 2500);
+    QCOMPARE(CommandEngine::extractValue(c), 2500);
+
+    // 超大值夹取：仅为避免 static_cast UB，夹取后必然超量程被 validate 拒绝
+    c.insert(QStringLiteral("value"), 1e18);
+    QCOMPARE(CommandEngine::extractValue(c), INT_MAX);
+    c.insert(QStringLiteral("value"), -1e18);
+    QCOMPARE(CommandEngine::extractValue(c), INT_MIN);
+
+    // 缺 value 字段：toDouble() 返回 0（validate 会先以"缺 value"拒绝，这里只验提取语义）
+    QJsonObject empty;
+    QCOMPARE(CommandEngine::extractValue(empty), 0);
+
+    // ★ 端到端：2500.9 经 validate + extractValue 全链路应放行（hys=150）。
+    // 修复前 extract 直接用 toInt() 会得到 0，被二次校验以"阈值 0"拦下。
+    QJsonObject cmd;
+    cmd.insert(QStringLiteral("action"), QLatin1String(Proto::ACTION_SET_TH));
+    cmd.insert(QStringLiteral("value"), 2500.9);
+    QString why;
+    QVERIFY2(CommandEngine::validate(cmd, 150, &why), qPrintable(why));
+    const int v = CommandEngine::extractValue(cmd);
+    QVERIFY2(v == 2500, qPrintable(QStringLiteral("extractValue 得 %1，期望 2500").arg(v)));
 }
 
 QTEST_APPLESS_MAIN(TestCommandEngine)
