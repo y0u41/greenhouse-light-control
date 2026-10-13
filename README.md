@@ -103,7 +103,7 @@ tests/
 
 ```bash
 py tools/contract_test.py              # 11 个契约测试，必须全绿
-py tools/consistency_check.py          # 30 项跨层一致性（固件/Qt/契约/文档 四处对齐）
+py tools/consistency_check.py          # 38 项跨层一致性（固件/Qt/契约/文档 四处对齐；数目以脚本输出为准）
 py tools/simulate_node.py --selftest   # 虚拟节点状态机自测（含手动优先、断帧残留）
 py tests\host\run_host_tests.py        # 主机端行为测试（control 129 + protocol 68 用例）
 py firmware/prebuild_check.py          # 固件编译前自检

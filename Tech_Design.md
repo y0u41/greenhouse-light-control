@@ -190,8 +190,8 @@ greenhouse/
 
 | type | 含义 | 关键字段 |
 | --- | --- | --- |
-| `report` | 周期数据上报 | node, adc, light, th, hys, relay, buzz, mode, ts |
-| `ack` | 指令执行回执 | node, action, result, adc, light, relay, buzz, mode |
+| `report` | 周期数据上报 | node, adc, light, th, hys, relay, buzz, mode |
+| `ack` | 指令执行回执 | node, action, result, adc, light, th, hys, relay, buzz, mode |
 | `evt` | 主动事件 | node, event（`alarm` / `recover`）, adc, light |
 <!-- FACT:proto-uplink END -->
 
@@ -213,6 +213,9 @@ greenhouse/
 #### 字段约定
 
 <!-- FACT:proto-fields BEGIN -->
+> **协议里没有时间字段**：节点无 RTC，`report` / `ack` / `evt` 均不含时间戳；
+> Qt 只在**落盘**时用本地时钟补打 CSV 的 `timestamp` 列（非协议字段，见下表之后）。
+
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `node` | int | 节点 ID（从 1 起），**所有帧必带**，多点位区分依据 |
@@ -223,9 +226,14 @@ greenhouse/
 | `relay` | int | 继电器状态（0 = 断开，1 = 吸合） |
 | `buzz` | int | 蜂鸣器状态（0 = 静音，1 = 鸣响） |
 | `mode` | int | 控制模式（0 = 自动，1 = 手动） |
-| `ts` | int | Unix 时间戳（秒）。节点无 RTC 时省略，**由 Qt 侧统一打时间戳** |
 | `result` | string | 执行结果（`"ok"` / `"err"`） |
 | `event` | string | 主动事件类型：`alarm`（越限报警）/ `recover`（回落恢复） |
+
+**非协议字段（仅存在于 Qt 落盘的 CSV，节点从不上报）**
+
+| 列名 | 类型 | 说明 |
+| --- | --- | --- |
+| `timestamp` | string | Qt 收到 `report` 帧时用本地时钟补打，ISO8601 毫秒 + 显式时区偏移（如 `2026-10-12T21:01:51.410+08:00`）。列序与落盘口径见 `README.md`「历史数据落盘（CSV）」 |
 <!-- FACT:proto-fields END -->
 
 #### 示例帧
@@ -242,7 +250,8 @@ greenhouse/
 ```
 <!-- FACT:proto-examples END -->
 
-> 上行帧若节点无 RTC，`ts` 省略；Qt 收到后补打时间戳再入库。
+> 协议**不含时间字段**：节点无 RTC，`report` / `ack` / `evt` 都不带 `ts`；
+> Qt 收到 `report` 后由本地时钟补打 CSV 的 `timestamp` 列（见上「字段约定」）。
 > 示例自洽性：`adc=1200 → light=2895 > th=2000 → relay/buzz=1`。
 
 #### 端口与地址约定
