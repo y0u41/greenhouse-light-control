@@ -183,7 +183,8 @@ function Invoke-Tests {
         @{ n = '主机端行为测试';     a = @('tests\host\run_host_tests.py') },
         @{ n = '文档生成区未漂移';   a = @('tools\sync_doc_tables.py', '--check') },
         @{ n = '虚拟节点自检';       a = @('tools\simulate_node.py', '--selftest') },
-        @{ n = 'Keil 工程引用校验';  a = @('tools\make_keil_project.py', '--check') }
+        @{ n = 'Keil 工程引用校验';  a = @('tools\make_keil_project.py', '--check') },
+        @{ n = 'Qt/Python 校验一致性快照'; a = @('tools\check_validate_parity.py', '--self-check') }
     )) {
         & $py @($t.a) *> $null
         if ($LASTEXITCODE -eq 0) { Ok $t.n } else { Fail "$($t.n)（退出码 $LASTEXITCODE）"; $failed++ }
