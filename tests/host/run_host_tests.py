@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-主机端行为测试运行器 —— 在 PC 上编译并运行 control.c / protocol.c 的用例。
+主机端行为测试运行器 —— 在 PC 上编译并运行 control.c / protocol.c / eeprom.c 的用例。
 
 为什么值得做（P0-2）：
   control.c 是全项目改动最频繁的文件，却只依赖 4 个 HAL 符号
@@ -55,6 +55,8 @@ SUITES = [
     ("protocol", [HOST / "test_protocol.c", HOST / "stubs_protocol.c",
                   ROOT / "firmware" / "Core" / "Src" / "protocol.c",
                   ROOT / "firmware" / "Middlewares" / "cJSON" / "cJSON.c"], "test_protocol"),
+    ("eeprom",   [HOST / "test_eeprom.c", HOST / "stubs_eeprom.c",
+                  ROOT / "firmware" / "Core" / "Src" / "eeprom.c"], "test_eeprom"),
 ]
 
 

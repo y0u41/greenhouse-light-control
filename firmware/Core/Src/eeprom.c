@@ -5,8 +5,8 @@
  * 硬件事实（Tech_Design 附录 A.1）：AT24C02 @ I2C1，PB6/PB7，7 位地址 0x50，
  * 硬件 4.7 K 上拉，板载硬连接不可复用。8 字节恰好一页，单次页写入即可。
  *
- * 写周期 ≤5 ms：页写入后用 HAL_I2C_IsDeviceReady 轮询 ACK（每轮喂狗），
- * 不盲等 delay_ms，避免长时间不喂 IWDG。
+ * 写周期 ≤5 ms：页写入后用 HAL_I2C_IsDeviceReady 轮询 ACK（每次探测后
+ * HAL_Delay(1) 保证间隔，见 at24c02_write 注释），探测之间每 5 次喂一次狗。
  */
 
 #include "eeprom.h"
@@ -66,23 +66,44 @@ static void MX_I2C1_Init(void)
     s_i2c_ready = true;
 }
 
+/* F1 的 I2C 在传输被打断后可能卡死在 BUSY 标志（HAL 返回错误后外设状态不干净）。
+ * 降级恢复：DeInit + 重 Init —— 清掉卡住的标志，比"永远不再尝试"更可维护。
+ * 失败不升级：s_i2c_ready 保持 false，Save/Load 走既有的"回退默认值"降级路径。 */
+static void i2c_force_reinit(void)
+{
+    HAL_I2C_DeInit(&s_hi2c1);
+    s_i2c_ready = false;
+    MX_I2C1_Init();
+}
+
 static bool at24c02_read(uint8_t addr, uint8_t *buf, uint16_t len)
 {
     return HAL_I2C_Mem_Read(&s_hi2c1, AT24C02_ADDR8_W, addr,
                             I2C_MEMADD_SIZE_8BIT, buf, len, 100) == HAL_OK;
 }
 
-/* 页写入 + ACK 轮询（每 5 次喂一次狗，写周期约 5 ms） */
+/* 页写入 + ACK 轮询。
+ *
+ * ★ 轮询间隔陷阱（N-1「set_th EEPROM_Save FAILED」的软件侧根因，
+ *   由主机测试 test_eeprom.c「write_cycle_busy_then_ack」用例锁定）：
+ *   AT24C02 页写入后进入 ≤5 ms 内部写周期，期间对**地址探测**一律 NACK；
+ *   而 HAL_I2C_IsDeviceReady 在探测到 NACK 时**立即**返回 HAL_ERROR ——
+ *   其 Timeout 参数只约束"等总线标志位"的时间，**不是两次探测之间的间隔**。
+ *   旧代码连续 20 次探测之间不加任何等待，整轮会在 <<1 ms 内耗尽，
+ *   于是即使数据其实已经写进去，EEPROM_Save 也误报失败（set_th 被回滚）。
+ *   现在每次探测后 HAL_Delay(1)：10 次 × 1 ms = 10 ms 窗口 ≥ 5 ms 写周期，
+ *   且远小于 IWDG 超时（每 5 次探测喂一次狗，总耗时 ≤10 ms）。 */
 static bool at24c02_write(uint8_t addr, const uint8_t *buf, uint16_t len)
 {
     if (HAL_I2C_Mem_Write(&s_hi2c1, AT24C02_ADDR8_W, addr,
                           I2C_MEMADD_SIZE_8BIT, (uint8_t *)buf, len, 100) != HAL_OK) {
         return false;
     }
-    for (uint8_t i = 0; i < 20U; i++) {
-        if (HAL_I2C_IsDeviceReady(&s_hi2c1, AT24C02_ADDR8_W, 1, 5) == HAL_OK) {
-            return true;                  /* ACK = 写入完成 */
+    for (uint8_t i = 0; i < 10U; i++) {
+        if (HAL_I2C_IsDeviceReady(&s_hi2c1, AT24C02_ADDR8_W, 1, 1) == HAL_OK) {
+            return true;                  /* ACK = 内部写入完成 */
         }
+        HAL_Delay(1);                     /* ★ 必须有间隔：否则探测循环在 <1 ms 内耗尽 */
         if ((i % 5U) == 4U) {
             Iwdg_Feed();
         }
@@ -110,7 +131,36 @@ bool EEPROM_Save(uint16_t th, uint16_t hys)
     buf[7] = (uint8_t)(ck & 0xFFU);
 
     MX_I2C1_Init();                        /* 幂等：首次调用才真正初始化 */
-    return at24c02_write(0x00, buf, EEPROM_DATA_LEN);
+    if (!s_i2c_ready) {
+        return false;
+    }
+    /* 第一次尝试：写入 + 回读校验。
+     * ACK 只证明"器件在总线上应答了地址"，回读才证明"内容真的落了盘"
+     * （写入期间总线被打断、读路径毛刺等都可能出现"ACK 了但内容不对"）。 */
+    if (at24c02_write(0x00, buf, EEPROM_DATA_LEN)) {
+        uint8_t rb[EEPROM_DATA_LEN];
+        if (at24c02_read(0x00, rb, EEPROM_DATA_LEN)
+            && memcmp(rb, buf, EEPROM_DATA_LEN) == 0) {
+            return true;
+        }
+        Dbg_Printf("[eeprom] write OK but verify FAILED, retry once\r\n");
+    }
+    /* 失败可能来自 I2C 外设锁死（F1 的 BUSY 标志卡住）：强制复位外设后重试
+     * 一次完整写入 + 校验。仍失败才返回 false —— 让"一次性总线毛刺"有机会自愈。 */
+    i2c_force_reinit();
+    if (!s_i2c_ready) {
+        return false;
+    }
+    if (!at24c02_write(0x00, buf, EEPROM_DATA_LEN)) {
+        return false;
+    }
+    {
+        uint8_t rb[EEPROM_DATA_LEN];
+        if (!at24c02_read(0x00, rb, EEPROM_DATA_LEN)) {
+            return false;
+        }
+        return memcmp(rb, buf, EEPROM_DATA_LEN) == 0;
+    }
 }
 
 bool EEPROM_Load(uint16_t *th, uint16_t *hys)
