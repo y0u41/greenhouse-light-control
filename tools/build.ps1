@@ -190,7 +190,15 @@ function Invoke-Tests {
     }
     Info '（firmware\prebuild_check.py 需要 CubeMX 骨架，此处只做提示）'
     & $py 'firmware\prebuild_check.py' *> $null
-    if ($LASTEXITCODE -eq 0) { Ok '固件 prebuild 自检' } else { Warn '固件 prebuild 自检有阻塞项（见单独运行输出）' }
+    if ($LASTEXITCODE -eq 0) {
+        Ok '固件 prebuild 自检'
+    } else {
+        # ★ 阻塞项必须计入 $failed：过去这里只 Warn，于是"重复定义 USART3_IRQHandler"
+        #   这类**必然链接失败**的问题被降级成提示，整条 -Target test 仍打"全部自检通过"
+        #   并 exit 0。门禁的意义就是"有阻塞项不许绿"，与上面 7 项口径保持一致。
+        Fail "固件 prebuild 自检有阻塞项（退出码 $LASTEXITCODE，见单独运行输出）"
+        $failed++
+    }
     Pop-Location
     if ($failed -gt 0) { exit 1 }
     Ok '全部自检通过'

@@ -24,6 +24,10 @@ make_keil_project.py —— 由官方模板生成 Keil MDK 工程（greenhouse.u
     py tools/make_keil_project.py --check      # 只校验被引用文件是否存在
     py tools/make_keil_project.py --debug      # 追加 -DDEBUG_UART=1（上板诊断）
 
+退出码
+    0 = 引用齐全；1 = 有被引用文件/包含路径缺失（**不论是否带 --check**）。
+    --check 只决定"校验完是否继续生成"，不决定是否报错 —— 详见 main()。
+
     注：原来的 --safeblink（-DSAFE_BLINK_TEST=1，只闪灯自检）已随 main.c 里那套
     被编译掉的备用 main() 一并移除；分诊"没进 main() / 进 main 后挂掉"请依赖
     main() 开头的裸寄存器三次闪灯，详见 docs/lessons.md#semihosting。
@@ -221,7 +225,8 @@ def generate_uvoptx() -> None:
 def main() -> None:
     global DEBUG_BUILD
     ap = argparse.ArgumentParser(description="生成 Keil MDK 工程")
-    ap.add_argument("--check", action="store_true", help="只校验引用文件是否存在")
+    ap.add_argument("--check", action="store_true",
+                    help="只校验引用文件是否存在（不生成）。引用缺失一律退出码 1，与本开关无关")
     ap.add_argument("--debug", action="store_true",
                     help="打开调试串口（追加 -DDEBUG_UART=1，用于上板诊断）")
     args = ap.parse_args()
@@ -232,8 +237,11 @@ def main() -> None:
         print("以下被引用文件缺失（%d 项）：" % len(missing))
         for m in missing:
             print("  X " + m)
-        if args.check:
-            sys.exit(1)
+        # ★ 引用缺失一律失败：裸跑（不带 --check）过去只打印警告就继续生成 uvprojx，
+        #   于是 build.ps1 的 `if ($LASTEXITCODE -ne 0)` 形同虚设 —— 缺文件的工程
+        #   会被"成功"生成，直到 Keil 编译才报错。--check 现在只表示"只校验不生成"，
+        #   不再影响是否报错。
+        sys.exit(1)
     else:
         print("引用校验通过：源文件与包含路径均存在")
     if DEBUG_BUILD:
