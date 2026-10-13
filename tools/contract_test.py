@@ -10,7 +10,8 @@
 #   - 下行指令校验与固件/Qt 的 validate() 一致
 #   - 上行 type / event 合法
 #   - 示例帧往返解析
-#   - 下行帧必须带 type="cmd" + action
+#   - 下行帧的**职责边界**：type="cmd" + node 由帧封装层保证（固件硬要求），
+#     validate_cmd 只校验 action —— 见 test_downlink_must_carry_cmd_type
 
 import json
 import sys
@@ -126,14 +127,64 @@ def test_example_frames_roundtrip():
             _fail("未知 type: %s" % raw)
 
 
+def _build_cmd(node_id, action, value=None):
+    """下行帧**封装层**的等价实现。
+
+    对应 qtapp/src/commandengine.cpp::CommandEngine::buildCmd()：
+        o.insert("node", nodeId);
+        o.insert("type", Proto::TYPE_CMD);   // protocol_actions.h: TYPE_CMD = "cmd"
+        o.insert("action", action);
+        set_th 时再 insert("value", value)；
+    这是 Qt 唯一的下行组包点（nodeserver.cpp 与 mainwindow.cpp 都走它）。
+    """
+    o = {"node": node_id, "type": P.DOWNLINK_TYPE, "action": action}
+    if action == P.ACTION_SET_TH:
+        o["value"] = value
+    return o
+
+
+def _expect(cond, msg):
+    """断言失败即走 _fail（带 FAIL: 前缀 + 非零退出码）。"""
+    if not cond:
+        _fail(msg)
+
+
 def test_downlink_must_carry_cmd_type():
-    # 协议规定下行帧 type="cmd"，防止固件/Qt 解析分支不一致
-    bad = {"node": 1, "action": "relay_on"}  # 缺 type
-    ok, _ = P.validate_cmd(bad)
-    # validate_cmd 只校验 action，不校验 type；这里单独断言 type 约定
-    if bad.get("type") != P.DOWNLINK_TYPE:
-        pass  # 由帧封装层保证，契约测试记录该约定
-    assert P.DOWNLINK_TYPE == "cmd"
+    """下行帧必须带 type="cmd" + node + action —— 但**由帧封装层保证**。
+
+    职责边界（三处实现一致，这也是本测试要钉住的约定）：
+      · 封装层  CommandEngine::buildCmd() 产出 {"node","type":"cmd","action"[,"value"]}；
+                固件 protocol.c::Protocol_RxByte/OnFrame 则**硬要求** type=="cmd"
+                且 node 存在 / 为数字 / int32 全宽相等，否则整帧丢弃。
+      · 校验层  tools/protocol_schema.py::validate_cmd() 与
+                CommandEngine::validate() **只看 action**，不重复校验 type/node。
+    因此本测试断言的是"封装层产出的帧一定含 type/node"，而不是"validate_cmd 会校验
+    type/node" —— 后者是假的（原实现 `if bad.get("type") != P.DOWNLINK_TYPE: pass`
+    恒不触发，`assert P.DOWNLINK_TYPE == "cmd"` 恒真，等于没测）。
+    """
+    # 1) 校验层职责：只看 action，type/node 缺失/错误都不影响判定
+    for act in sorted(P.ACTION_SET):
+        extra = {"value": 2500} if act == P.ACTION_SET_TH else {}
+        ok, why = P.validate_cmd({"action": act, **extra})
+        _expect(ok, "validate_cmd 应接受合法 action=%s：%s" % (act, why))
+        ok_missing, _ = P.validate_cmd(extra)          # 连 action 都没有
+        _expect(not ok_missing, "缺 action 必须被 validate_cmd 拒绝")
+
+    # 2) 封装层职责：产出的 dict 必须含 type/node/action，且 type 恰为 "cmd"
+    for act in sorted(P.ACTION_SET):
+        value = 2500 if act == P.ACTION_SET_TH else None
+        frame = _build_cmd(1, act, value)
+        _expect("type" in frame, "下行帧缺 type：%r" % frame)
+        _expect(frame["type"] == P.DOWNLINK_TYPE,
+                "下行帧 type 必须是 %r，实为 %r" % (P.DOWNLINK_TYPE, frame.get("type")))
+        _expect("node" in frame, "下行帧缺 node：%r" % frame)
+        _expect("action" in frame, "下行帧缺 action：%r" % frame)
+        # 固件 protocol.c 用的是 cJSON_IsNumber -> JSON 布尔不算数字
+        _expect(isinstance(frame["node"], int) and not isinstance(frame["node"], bool),
+                "node 必须是数字（固件 cJSON_IsNumber）：%r" % frame["node"])
+
+    # 3) 契约常量本身（唯一事实源）
+    _expect(P.DOWNLINK_TYPE == "cmd", "DOWNLINK_TYPE 必须是 cmd")
 
 
 # ---------------- 自带 runner（无 pytest 也可执行） ----------------
