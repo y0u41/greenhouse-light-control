@@ -98,6 +98,7 @@ def verify(out_path: Path) -> bool:
 
     with zipfile.ZipFile(out_path) as z:
         names = z.namelist()
+        n_binary = 0
 
         # ① 路径级检查
         for n in names:
@@ -106,7 +107,18 @@ def verify(out_path: Path) -> bool:
                     problems.append("包内出现禁止项: %s  (匹配 %s)" % (n, pat))
                     break
 
-        # ② 内容级检查：真实凭据不得出现在包内任何文件中
+        # ② 内容级检查：真实凭据不得出现在包内**任何**文件中
+        #
+        # ★ 修正（重要）：原先这里对含 \x00 的文件 `continue` 整段跳过，
+        #   于是 .docx / .uvprojx / .dbgconf 这类二进制文件**完全不被检查**，
+        #   而脚本依然打印"[OK] 校验通过：无凭据泄漏" —— 本脚本是交付前
+        #   防凭据泄漏的唯一防线，这个"看不见的豁免"等于安全属性是假的。
+        #   实测（改前）：把真实密码放进一个含 \x00 的 tracked 文件 → exit 0
+        #   且打印"可以交付"；同一密码放进文本文件 → 正确 exit 1 并删包。
+        #
+        #   现改为**统一在字节级搜索**：对 UTF-8 文本等价（且比 decode 更强，
+        #   不受编码错误影响），对二进制同样有效。并统计实际检查到的二进制
+        #   文件数，让"守卫覆盖范围"在输出里可见，而不是沉默地缩小。
         for n in names:
             if n.endswith("/"):
                 continue
@@ -114,15 +126,18 @@ def verify(out_path: Path) -> bool:
                 raw = z.read(n)
             except Exception:
                 continue
-            if b"\x00" in raw[:4096]:       # 二进制跳过
-                continue
-            txt = raw.decode("utf-8", errors="replace")
+            if b"\x00" in raw[:4096]:
+                n_binary += 1
             for k, v in secrets:
-                if v in txt:
+                if v.encode("utf-8") in raw:
                     leaked[k] += 1
-                    problems.append("凭据泄漏: %s 的值出现在 %s" % (k, n))
+                    problems.append(
+                        "凭据泄漏: %s 的值出现在 %s%s"
+                        % (k, n, "（二进制文件，按字节级搜索）"
+                           if b"\x00" in raw[:4096] else ""))
 
-    print("  包内文件数: %d" % len(names))
+    print("  包内文件数: %d（含二进制 %d —— 二进制也已按字节级搜索，不再豁免）"
+          % (len(names), n_binary))
     if secrets:
         print("  已用 %d 项本地真实凭据做过全文搜索: %s"
               % (len(secrets), ", ".join(k for k, _ in secrets)))
