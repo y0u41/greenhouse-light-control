@@ -17,6 +17,12 @@ cmake-build-*/
 firmware/Output/
 firmware/Projects/MDK-ARM/DebugConfig/
 firmware/Projects/MDK-ARM/build.log
+# Keil Assistant / VSCode-CppTools 的**本机态**文件：不是工程事实源。
+#   · c_cpp_properties.json 内嵌 37 条 `d:\正点原子\...` 绝对路径 + 生成时的
+#     DEBUG_UART=1（与发布态 uvprojx 不一致），换机即失效，无协作价值。
+#   · uv4.log.lock 是 UV4 退出时残留的 0 字节进程锁。
+# 已 git rm --cached；include 路径的真源是 tools/make_keil_project.py 里的 INCLUDE_PATHS。
+firmware/Projects/MDK-ARM/.vscode/
 *.uvguix.*
 *.uvoptx
 *.dep
@@ -45,5 +51,5 @@ Thumbs.db
 desktop.ini
 .DS_Store
 
-# ---- �������Բ��� ----
+# ---- 主机测试产物 ----
 tests/host/build/
