@@ -1,5 +1,7 @@
 # 智能温室感光控制系统
 
+![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-STM32F103-blue) ![Qt](https://img.shields.io/badge/Qt-6.12-blue)
+
 STM32 本地闭环 + ESP8266 上报 + Qt 上位机 + llama.cpp 本地大模型的温室感光控制。
 
 - 需求以 [PRD.md](PRD.md) 为准
