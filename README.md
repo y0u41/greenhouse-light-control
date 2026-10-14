@@ -1,16 +1,31 @@
 # 智能温室感光控制系统
 
-![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-STM32F103-blue) ![Qt](https://img.shields.io/badge/Qt-6.12-blue)
+![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-STM32F103-blue) ![Qt](https://img.shields.io/badge/Qt-6.12-blue) ![Build](https://img.shields.io/badge/build-0%20Error-brightgreen)
 
-STM32 本地闭环 + ESP8266 上报 + Qt 上位机 + llama.cpp 本地大模型的温室感光控制。
+基于 **STM32 + ESP8266 + Qt 6 上位机 + llama.cpp 本地大模型** 的智能温室感光控制系统。光照超阈值自动补光/遮阳，数据实时上报上位机曲线显示，支持自然语言指令控制。
 
-- 需求以 [PRD.md](PRD.md) 为准
-- 技术方案（**引脚 / 电平极性 / 协议 / 阈值的唯一事实来源**）以 [Tech_Design.md](Tech_Design.md) 为准
-- 协作约定与已知陷阱见 [AGENTS.md](AGENTS.md)
-- 对外提交稿见 [项目规划书.md](项目规划书.md) / [项目规划书.docx](项目规划书.docx)（docx 由 md 生成，勿手改）
-- **设计报告（任务书第 4 项）见 [设计报告.md](设计报告.md) / [设计报告.docx](设计报告.docx)** —— 实测数据与【待测】项严格区分，未实测不填推测值
+## 功能特性
 
-## 系统形态
+- ☀️ **光照闭环控制**：ADC 采集 → 阈值 + 回差判断 → LED/继电器自动补光或遮阳
+- 📡 **WiFi 数据上报**：ESP8266 AT 透传，1s 周期上报，断网自动重连
+- 📊 **Qt 上位机**：实时曲线、控制面板、节点状态监控
+- 🤖 **本地大模型**：llama.cpp 自然语言 → JSON 指令，无需联网
+- 🛡️ **本地自治**：断网/上位机未启动时，固件端闭环照常工作
+
+## 快速开始
+
+```powershell
+# 一键构建（固件 + 上位机 + 自检）
+powershell -ExecutionPolicy Bypass -File tools\build.ps1
+
+# 只构建上位机
+powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Target qt
+
+# 只跑自检
+powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Target test
+```
+
+## 系统架构
 
 ```text
 光敏(PF8/ADC3_IN6) → STM32 本地闭环(阈值+回差+手动优先) → 执行器/蜂鸣器
@@ -279,3 +294,16 @@ py tools\package_submission.py -o D:\提交.zip   # 指定输出路径
 
 > 状态口径：**已编译通过** = 真实工具链构建成功（固件 0 错误 0 警告；上位机可运行）；
 > **待上板** = 需要真实硬件才能验证的项，不要写成"已验证"。
+
+## 项目文档
+
+| 文档 | 说明 |
+|------|------|
+| [PRD.md](PRD.md) | 产品需求文档 |
+| [Tech_Design.md](Tech_Design.md) | 技术方案（引脚/协议/阈值唯一事实源） |
+| [设计报告.md](设计报告.md) | 实测数据与验收报告 |
+| [AGENTS.md](AGENTS.md) | 协作约定与已知陷阱 |
+
+## 许可证
+
+[MIT License](LICENSE) © y0u41
