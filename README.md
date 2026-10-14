@@ -102,10 +102,10 @@ powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Target test
 ## 系统架构
 
 ```text
-光敏(PF8/ADC3_IN6) → STM32 本地闭环(阈值+回差+手动优先) → 执行器/蜂鸣器
-                         │ 1 s 上报（同时充当链路心跳）
-                         ▼
-ESP8266(AT 透传) ──TCP:9092──▶ Qt NodeServer ──▶ 曲线/控制面板
+光敏(PF8/ADC3_IN6) → STM32 本地闭环(阈值+回差+手动优先) → 执行器/蜂鸣器                 
+                         │ 1 s 上报（同时充当链路心跳）                                 
+                         ▼                                                              
+ESP8266(AT 透传) ──TCP:9092──▶ Qt NodeServer ──▶ 曲线/控制面板                          
                                                                                        │
                                         └─▶ llama.cpp(127.0.0.1:8092) 自然语言→JSON 指令
 ```
@@ -155,16 +155,16 @@ powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Target test # 只跑�
 ```text
 firmware/                     STM32 固件（HAL）
 ├─ Core/Inc|Src/              业务模块：main / adc_light / control / protocol / eeprom / esp8266 / lcd_show
-│                             + CubeMX 约定件：stm32f1xx_hal_conf.h、stm32f1xx_it.c/h     
-├─ Drivers/                   HAL + CMSIS + 官方 BSP（从资料盘拷入；BSP 含 LCD）          
-├─ Middlewares/cJSON/         下行 JSON 解析                                              
-├─ Projects/MDK-ARM/          greenhouse.uvprojx（由脚本生成）、_template_atk_f103.uvprojx
-├─ Output/                    Keil 产物（不入仓）                                         
-├─ CUBEMX_SETUP.md            CubeMX/外设配置清单                                         
-└─ prebuild_check.py          编译前静态自检（缺文件 / 双初始化 / 引脚主权）              
+│                             + CubeMX 约定件：stm32f1xx_hal_conf.h、stm32f1xx_it.c/h
+├─ Drivers/                   HAL + CMSIS + 官方 BSP（从资料盘拷入；BSP 含 LCD）                           
+├─ Middlewares/cJSON/         下行 JSON 解析                                                               
+├─ Projects/MDK-ARM/          greenhouse.uvprojx（由脚本生成）、_template_atk_f103.uvprojx                 
+├─ Output/                    Keil 产物（不入仓）                                                          
+├─ CUBEMX_SETUP.md            CubeMX/外设配置清单                                                          
+└─ prebuild_check.py          编译前静态自检（缺文件 / 双初始化 / 引脚主权）                               
 qtapp/                        Qt 6 上位机
-├─ CMakeLists.txt
-└─ src/                       MainWindow（纯 UI 装配 / 信号转发）/ NodeServer / NodeModel /
+├─ CMakeLists.txt                                                                                          
+└─ src/                       MainWindow（纯 UI 装配 / 信号转发）/ NodeServer / NodeModel /                
                               CommandEngine / CommandAckGuard /
                               CsvLogger（历史数据落盘）/ LlmClient / LlmController（LLM 线程 +
                               /health 探测 + 可用性）/ ChartWidget / ControlPanel /
@@ -172,20 +172,20 @@ qtapp/                        Qt 6 上位机
                               播报开关）/ Config
                               protocol_actions.h（协议词汇 C++ 侧单一事实源）
 tools/
-├─ protocol_schema.py         协议契约单一事实源（动作词汇 + 字段校验）
-├─ contract_test.py           协议契约测试（动作词汇 / set_th 边界 / 示例帧）
-├─ consistency_check.py       跨层一致性守护（固件 ↔ Qt ↔ 契约 ↔ 文档）
-├─ simulate_node.py           虚拟节点（多点位演示 / 协议自测）
-├─ hil_probe.py               硬件在环验证探针（代替 Qt 当 TCP 服务端，核对协议不变式）
-├─ probe.py                   上板 SWD 探针（板子无响应时读 uwTick/寄存器/故障栈帧取证，
+├─ protocol_schema.py         协议契约单一事实源（动作词汇 + 字段校验）                                    
+├─ contract_test.py           协议契约测试（动作词汇 / set_th 边界 / 示例帧）                              
+├─ consistency_check.py       跨层一致性守护（固件 ↔ Qt ↔ 契约 ↔ 文档）                                    
+├─ simulate_node.py           虚拟节点（多点位演示 / 协议自测）                                            
+├─ hil_probe.py               硬件在环验证探针（代替 Qt 当 TCP 服务端，核对协议不变式）                    
+├─ probe.py                   上板 SWD 探针（板子无响应时读 uwTick/寄存器/故障栈帧取证，                   
 │                             不依赖网络；与 hil_probe.py 分属芯片级 / 协议级，互补不重复）
-├─ package_submission.py      交付打包（git archive + 密钥结构性排除，包后自校验）         
-├─ make_keil_project.py       由模板生成 greenhouse.uvprojx（含引用校验）                  
-├─ build.ps1                  一键构建与自检（含中文路径规避）                             
-├─ bump_version.py            文档集版本号 + 修订记录一次同步                              
-└─ md2docx.py                 项目规划书 md → docx                                         
+├─ package_submission.py      交付打包（git archive + 密钥结构性排除，包后自校验）                         
+├─ make_keil_project.py       由模板生成 greenhouse.uvprojx（含引用校验）                                  
+├─ build.ps1                  一键构建与自检（含中文路径规避）                                             
+├─ bump_version.py            文档集版本号 + 修订记录一次同步                                              
+└─ md2docx.py                 项目规划书 md → docx                                                         
 tests/
-└─ host/                      主机端行为测试（原生 gcc 编译 control.c / protocol.c / eeprom.c 原文）
+└─ host/                      主机端行为测试（原生 gcc 编译 control.c / protocol.c / eeprom.c 原文）       
 ```
 
 ## 快速开始（分步）
