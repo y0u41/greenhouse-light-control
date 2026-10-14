@@ -1,10 +1,84 @@
-# 智能温室感光控制系统
+# 🌱 智能温室感光控制系统
 
-![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-STM32F103-blue) ![Qt](https://img.shields.io/badge/Qt-6.12-blue) ![Build](https://img.shields.io/badge/build-0%20Error-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-STM32F103-blue) ![Qt](https://img.shields.io/badge/Qt-6.12-blue) ![Build](https://img.shields.io/badge/build-0%20Error-brightgreen) ![AI](https://img.shields.io/badge/LLM-llama.cpp-orange)
 
-基于 **STM32 + ESP8266 + Qt 6 上位机 + llama.cpp 本地大模型** 的智能温室感光控制系统。光照超阈值自动补光/遮阳，数据实时上报上位机曲线显示，支持自然语言指令控制。
+> 基于 STM32 + Qt + 本地大模型的智能温室，光照自动补光/遮阳，支持自然语言控制 🌿
 
-## 功能特性
+## 这是什么？
+
+一个**软硬结合**的智能温室系统：STM32 固件负责光照闭环控制，Qt 上位机显示实时曲线，还能通过 **llama.cpp 本地大模型**用自然语言控制设备（无需联网）。
+
+**适合场景**：
+- 🌱 智能农业 / 温室自动化
+- 📚 学习 STM32 + Qt 上位机开发
+- 🤖 本地大模型嵌入式应用实战
+
+## ✨ 功能特性
+
+### 硬件控制
+- ☀️ **光照闭环**：ADC 采集 → 阈值判断 → 自动补光/遮阳
+- 🛡️ **本地自治**：断网时固件端闭环照常工作
+
+### 数据上报
+- 📡 **WiFi 传输**：ESP8266 AT 透传，1s 周期上报
+- 📶 **断线重连**：自动检测并恢复连接
+
+### 上位机
+- 📊 **Qt 6 界面**：实时曲线、控制面板、节点状态
+- 🤖 **自然语言控制**：llama.cpp 本地大模型，无需联网
+
+## 🛠️ 技术栈
+
+| 层 | 技术 |
+|---|---|
+| 固件 | STM32F103 + Keil MDK + HAL |
+| 通信 | ESP8266 AT + TCP:9092 |
+| 上位机 | Qt 6.12 + CMake + MinGW |
+| AI | llama.cpp（本地 127.0.0.1:8092） |
+
+## 📁 目录结构
+
+```
+greenhouse-light-control/
+├── firmware/               # STM32 固件
+│   ├── User/App/           # 应用层
+│   └── Projects/MDK-ARM/   # Keil 工程
+├── host/                   # Qt 上位机
+├── tools/                  # 构建与测试脚本
+│   ├── build.ps1           # 一键构建
+│   └── contract_test.py    # 协议测试
+└── docs/                   # 项目文档
+```
+
+## 🚀 快速开始
+
+```powershell
+# 一键构建（固件 + 上位机 + 自检）
+powershell -ExecutionPolicy Bypass -File tools\build.ps1
+
+# 只构建上位机
+powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Target qt
+
+# 只跑测试
+powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Target test
+```
+
+**构建状态**：
+- ✅ 固件：0 Error / 0 Warning
+- ✅ 协议测试：11/11 通过
+- ✅ Qt 上位机：构建通过
+
+## 📚 文档
+
+| 文档 | 内容 |
+|------|------|
+| [设计报告.md](设计报告.md) | 系统设计与验收记录 |
+| [Tech_Design.md](Tech_Design.md) | 技术细节与接口定义 |
+| [README_Hardware.md](README_Hardware.md) | 硬件接线说明 |
+
+## 📄 许可证
+
+[MIT License](LICENSE) © y0u41
 
 - ☀️ **光照闭环控制**：ADC 采集 → 阈值 + 回差判断 → LED/继电器自动补光或遮阳
 - 📡 **WiFi 数据上报**：ESP8266 AT 透传，1s 周期上报，断网自动重连
