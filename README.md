@@ -41,13 +41,13 @@
 ```
 greenhouse-light-control/
 ├── firmware/               # STM32 固件
-│   ├── User/App/           # 应用层
-│   └── Projects/MDK-ARM/   # Keil 工程
-├── host/                   # Qt 上位机
+│   ├── User/App/           # 应用层        
+│   └── Projects/MDK-ARM/   # Keil 工程     
+├── host/                   # Qt 上位机     
 ├── tools/                  # 构建与测试脚本
-│   ├── build.ps1           # 一键构建
-│   └── contract_test.py    # 协议测试
-└── docs/                   # 项目文档
+│   ├── build.ps1           # 一键构建      
+│   └── contract_test.py    # 协议测试      
+└── docs/                   # 项目文档      
 ```
 
 ## 🚀 快速开始
@@ -106,7 +106,7 @@ powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Target test
                          │ 1 s 上报（同时充当链路心跳）
                          ▼
 ESP8266(AT 透传) ──TCP:9092──▶ Qt NodeServer ──▶ 曲线/控制面板
-                                        │
+                                                                                       │
                                         └─▶ llama.cpp(127.0.0.1:8092) 自然语言→JSON 指令
 ```
 
@@ -155,13 +155,13 @@ powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Target test # 只跑�
 ```text
 firmware/                     STM32 固件（HAL）
 ├─ Core/Inc|Src/              业务模块：main / adc_light / control / protocol / eeprom / esp8266 / lcd_show
-│                             + CubeMX 约定件：stm32f1xx_hal_conf.h、stm32f1xx_it.c/h
-├─ Drivers/                   HAL + CMSIS + 官方 BSP（从资料盘拷入；BSP 含 LCD）
-├─ Middlewares/cJSON/         下行 JSON 解析
+│                             + CubeMX 约定件：stm32f1xx_hal_conf.h、stm32f1xx_it.c/h     
+├─ Drivers/                   HAL + CMSIS + 官方 BSP（从资料盘拷入；BSP 含 LCD）          
+├─ Middlewares/cJSON/         下行 JSON 解析                                              
 ├─ Projects/MDK-ARM/          greenhouse.uvprojx（由脚本生成）、_template_atk_f103.uvprojx
-├─ Output/                    Keil 产物（不入仓）
-├─ CUBEMX_SETUP.md            CubeMX/外设配置清单
-└─ prebuild_check.py          编译前静态自检（缺文件 / 双初始化 / 引脚主权）
+├─ Output/                    Keil 产物（不入仓）                                         
+├─ CUBEMX_SETUP.md            CubeMX/外设配置清单                                         
+└─ prebuild_check.py          编译前静态自检（缺文件 / 双初始化 / 引脚主权）              
 qtapp/                        Qt 6 上位机
 ├─ CMakeLists.txt
 └─ src/                       MainWindow（纯 UI 装配 / 信号转发）/ NodeServer / NodeModel /
@@ -179,11 +179,11 @@ tools/
 ├─ hil_probe.py               硬件在环验证探针（代替 Qt 当 TCP 服务端，核对协议不变式）
 ├─ probe.py                   上板 SWD 探针（板子无响应时读 uwTick/寄存器/故障栈帧取证，
 │                             不依赖网络；与 hil_probe.py 分属芯片级 / 协议级，互补不重复）
-├─ package_submission.py      交付打包（git archive + 密钥结构性排除，包后自校验）
-├─ make_keil_project.py       由模板生成 greenhouse.uvprojx（含引用校验）
-├─ build.ps1                  一键构建与自检（含中文路径规避）
-├─ bump_version.py            文档集版本号 + 修订记录一次同步
-└─ md2docx.py                 项目规划书 md → docx
+├─ package_submission.py      交付打包（git archive + 密钥结构性排除，包后自校验）         
+├─ make_keil_project.py       由模板生成 greenhouse.uvprojx（含引用校验）                  
+├─ build.ps1                  一键构建与自检（含中文路径规避）                             
+├─ bump_version.py            文档集版本号 + 修订记录一次同步                              
+└─ md2docx.py                 项目规划书 md → docx                                         
 tests/
 └─ host/                      主机端行为测试（原生 gcc 编译 control.c / protocol.c / eeprom.c 原文）
 ```
